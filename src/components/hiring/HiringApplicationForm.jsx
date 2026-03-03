@@ -1,116 +1,121 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { motion } from "framer-motion";
-import { Upload, X, FileText, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import React, { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select-component";
-import { fetchRoleTypes, submitApplication } from "@/lib/hiringService";
+import { submitApplication } from "@/lib/hiringService";
 
-const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) => {
-  // ── Role types from API ──
-  const [roleTypes, setRoleTypes] = useState([]);
-  const [roleTypesLoading, setRoleTypesLoading] = useState(true);
-  const [roleTypesError, setRoleTypesError] = useState(null);
+const INITIAL_FORM = {
+  full_name: "",
+  email: "",
+  phone: "",
+  motivation: "",
+  are_you_student: "",
+  university: "",
+  department: "",
+  level: "",
+};
 
-  // ── Form state ──
+const fadeIn = {
+  hidden: { opacity: 0, y: 15 },
+  visible: (i) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.06, duration: 0.5, ease: "easeOut" },
+  }),
+};
+
+const conditionalSlide = {
+  initial: { opacity: 0, height: 0, marginTop: 0 },
+  animate: {
+    opacity: 1,
+    height: "auto",
+    marginTop: 20,
+    transition: { duration: 0.35, ease: "easeOut" },
+  },
+  exit: {
+    opacity: 0,
+    height: 0,
+    marginTop: 0,
+    transition: { duration: 0.25, ease: "easeIn" },
+  },
+};
+
+/** @param {{ defaultPosition: string }} props */
+const HiringApplicationForm = ({ defaultPosition = "" }) => {
   const [form, setForm] = useState({
-    full_name: "",
-    email: "",
-    phone: "",
-    role_type: defaultRoleType,
+    ...INITIAL_FORM,
     position: defaultPosition,
-    cover_message: "",
   });
 
-  const isPositionPrefilled = Boolean(defaultPosition);
-  const isRoleTypePrefilled = Boolean(defaultRoleType);
-  const [resume, setResume] = useState(null);
-  const fileInputRef = useRef(null);
-
-  // ── Submission state ──
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [generalError, setGeneralError] = useState(null);
 
-  // ── Fetch role types on mount ──
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await fetchRoleTypes();
-        if (!cancelled) setRoleTypes(data.role_types ?? []);
-      } catch (err) {
-        if (!cancelled) setRoleTypesError("Failed to load role types. Please refresh.");
-      } finally {
-        if (!cancelled) setRoleTypesLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  const isStudent = form.are_you_student === "yes";
 
-  // ── Helpers ──
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
     if (fieldErrors[name]) {
-      setFieldErrors((prev) => { const n = { ...prev }; delete n[name]; return n; });
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
     }
   };
 
-  const handleRoleTypeChange = (value) => {
-    setForm((prev) => ({ ...prev, role_type: value }));
-    if (fieldErrors.role_type) {
-      setFieldErrors((prev) => { const n = { ...prev }; delete n.role_type; return n; });
+  const handleStudentChange = (value) => {
+    setForm((prev) => ({
+      ...prev,
+      are_you_student: value,
+      ...(value === "no" ? { university: "", department: "", level: "" } : {}),
+    }));
+    if (fieldErrors.are_you_student) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next.are_you_student;
+        return next;
+      });
     }
   };
 
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.type !== "application/pdf") {
-        setFieldErrors((prev) => ({ ...prev, resume: ["Only PDF files are accepted."] }));
-        return;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        setFieldErrors((prev) => ({ ...prev, resume: ["File size must be under 10 MB."] }));
-        return;
-      }
-      setResume(file);
-      setFieldErrors((prev) => { const n = { ...prev }; delete n.resume; return n; });
-    }
-  };
-
-  const removeFile = () => {
-    setResume(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  // ── Client-side validation ──
   const validate = () => {
     const errs = {};
+
     if (!form.full_name.trim()) errs.full_name = ["Full name is required."];
+
     if (!form.email.trim()) {
       errs.email = ["Email is required."];
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
       errs.email = ["Enter a valid email address."];
     }
-    if (!form.role_type) errs.role_type = ["Please select a role type."];
+
+    if (!form.phone.trim()) errs.phone = ["Phone number is required."];
+
+    if (!form.are_you_student) {
+      errs.are_you_student = ["Please select an option."];
+    }
+
+    if (form.are_you_student === "yes") {
+      if (!form.university.trim()) errs.university = ["University is required."];
+      if (!form.department.trim()) errs.department = ["Department is required."];
+      if (!form.level.trim()) errs.level = ["Level is required."];
+    }
+
+    if (!form.motivation.trim()) errs.motivation = ["This field is required."];
+
     if (!form.position.trim()) errs.position = ["Position is required."];
+
     return errs;
   };
 
-  // ── Submit ──
   const handleSubmit = async (e) => {
     e.preventDefault();
     setGeneralError(null);
@@ -125,11 +130,17 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
     setSubmitting(true);
 
     try {
-      const result = await submitApplication({ ...form, resume: resume || undefined });
+      const result = await submitApplication({
+        full_name: form.full_name,
+        email: form.email,
+        phone: form.phone,
+        role_type: "intern",
+        position: form.position,
+        cover_message: form.motivation,
+      });
+
       setSuccess(result.message || "Application submitted successfully!");
-      // Clear form
-      setForm({ full_name: "", email: "", phone: "", role_type: defaultRoleType, position: defaultPosition, cover_message: "" });
-      removeFile();
+      setForm({ ...INITIAL_FORM, position: defaultPosition });
     } catch (err) {
       const status = err?.response?.status;
       if (status === 400 && err?.response?.data) {
@@ -137,7 +148,9 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
         if (typeof data === "object" && !data.detail) {
           setFieldErrors(data);
         } else {
-          setGeneralError(data.detail || "Validation failed. Please check your inputs.");
+          setGeneralError(
+            data.detail || "Validation failed. Please check your inputs."
+          );
         }
       } else {
         setGeneralError("Something went wrong. Please try again later.");
@@ -147,16 +160,6 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
     }
   };
 
-  const fadeIn = {
-    hidden: { opacity: 0, y: 15 },
-    visible: (i) => ({
-      opacity: 1,
-      y: 0,
-      transition: { delay: i * 0.06, duration: 0.5, ease: "easeOut" },
-    }),
-  };
-
-  // ── Success state ──
   if (success) {
     return (
       <motion.div
@@ -168,7 +171,9 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
           <CheckCircle2 className="h-8 w-8 text-green-500" />
         </div>
         <h3 className="text-2xl font-bold">{success}</h3>
-        <p className="text-muted-foreground">We'll review your application and reach out to you soon.</p>
+        <p className="text-muted-foreground">
+          We&apos;ll review your application and reach out to you soon.
+        </p>
         <Button
           onClick={() => setSuccess(null)}
           variant="outline"
@@ -181,7 +186,10 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
   }
 
   return (
-    <form onSubmit={handleSubmit} className="p-8 md:p-10 rounded-3xl bg-card border border-border space-y-6">
+    <form
+      onSubmit={handleSubmit}
+      className="p-8 md:p-10 rounded-3xl bg-card border border-border space-y-6"
+    >
       {generalError && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
@@ -195,7 +203,13 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
 
       {/* Full Name & Email */}
       <div className="grid md:grid-cols-2 gap-5">
-        <motion.div custom={0} variants={fadeIn} initial="hidden" animate="visible" className="space-y-2">
+        <motion.div
+          custom={0}
+          variants={fadeIn}
+          initial="hidden"
+          animate="visible"
+          className="space-y-2"
+        >
           <Label htmlFor="full_name">
             Full Name <span className="text-destructive">*</span>
           </Label>
@@ -207,12 +221,16 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
             onChange={handleChange}
             className="bg-muted/50 border-border h-12 rounded-xl"
           />
-          {fieldErrors.full_name && (
-            <p className="text-xs text-destructive mt-1">{fieldErrors.full_name[0]}</p>
-          )}
+          <FieldError errors={fieldErrors.full_name} />
         </motion.div>
 
-        <motion.div custom={1} variants={fadeIn} initial="hidden" animate="visible" className="space-y-2">
+        <motion.div
+          custom={1}
+          variants={fadeIn}
+          initial="hidden"
+          animate="visible"
+          className="space-y-2"
+        >
           <Label htmlFor="email">
             Email <span className="text-destructive">*</span>
           </Label>
@@ -225,16 +243,22 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
             onChange={handleChange}
             className="bg-muted/50 border-border h-12 rounded-xl"
           />
-          {fieldErrors.email && (
-            <p className="text-xs text-destructive mt-1">{fieldErrors.email[0]}</p>
-          )}
+          <FieldError errors={fieldErrors.email} />
         </motion.div>
       </div>
 
-      {/* Phone & Role Type */}
+      {/* Phone & Position */}
       <div className="grid md:grid-cols-2 gap-5">
-        <motion.div custom={2} variants={fadeIn} initial="hidden" animate="visible" className="space-y-2">
-          <Label htmlFor="phone">Phone</Label>
+        <motion.div
+          custom={2}
+          variants={fadeIn}
+          initial="hidden"
+          animate="visible"
+          className="space-y-2"
+        >
+          <Label htmlFor="phone">
+            Phone <span className="text-destructive">*</span>
+          </Label>
           <Input
             id="phone"
             name="phone"
@@ -243,127 +267,152 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
             onChange={handleChange}
             className="bg-muted/50 border-border h-12 rounded-xl"
           />
-          {fieldErrors.phone && (
-            <p className="text-xs text-destructive mt-1">{fieldErrors.phone[0]}</p>
-          )}
+          <FieldError errors={fieldErrors.phone} />
         </motion.div>
 
-        {isRoleTypePrefilled ? (
-          <input type="hidden" name="role_type" value={form.role_type} />
-        ) : (
-          <motion.div custom={3} variants={fadeIn} initial="hidden" animate="visible" className="space-y-2">
-            <Label>
-              Role Type <span className="text-destructive">*</span>
-            </Label>
-            {roleTypesLoading ? (
-              <div className="h-12 rounded-xl bg-muted/50 border border-border flex items-center px-4">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mr-2" />
-                <span className="text-sm text-muted-foreground">Loading roles…</span>
-              </div>
-            ) : roleTypesError ? (
-              <div className="h-12 rounded-xl bg-destructive/5 border border-destructive/20 flex items-center px-4">
-                <span className="text-sm text-destructive">{roleTypesError}</span>
-              </div>
-            ) : (
-              <Select value={form.role_type} onValueChange={handleRoleTypeChange}>
-                <SelectTrigger className="bg-muted/50 border-border h-12 rounded-xl">
-                  <SelectValue placeholder="Select role type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {roleTypes.map((rt) => (
-                    <SelectItem key={rt.value} value={rt.value}>
-                      {rt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            {fieldErrors.role_type && (
-              <p className="text-xs text-destructive mt-1">{fieldErrors.role_type[0]}</p>
-            )}
-          </motion.div>
-        )}
+        <motion.div
+          custom={3}
+          variants={fadeIn}
+          initial="hidden"
+          animate="visible"
+          className="space-y-2"
+        >
+          <Label htmlFor="position">
+            Position <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id="position"
+            name="position"
+            value={form.position}
+            readOnly
+            className="bg-muted/50 border-border h-12 rounded-xl opacity-70 cursor-not-allowed"
+          />
+          <FieldError errors={fieldErrors.position} />
+        </motion.div>
       </div>
 
-      {/* Position */}
-      <motion.div custom={4} variants={fadeIn} initial="hidden" animate="visible" className="space-y-2">
-        <Label htmlFor="position">
-          Position <span className="text-destructive">*</span>
+      {/* Are you currently a student? */}
+      <motion.div
+        custom={4}
+        variants={fadeIn}
+        initial="hidden"
+        animate="visible"
+        className="space-y-3"
+      >
+        <Label>
+          Are you currently a student?{" "}
+          <span className="text-destructive">*</span>
         </Label>
-        <Input
-          id="position"
-          name="position"
-          placeholder="e.g. Frontend Developer, Marketing Intern"
-          value={form.position}
-          onChange={isPositionPrefilled ? undefined : handleChange}
-          readOnly={isPositionPrefilled}
-          className={`bg-muted/50 border-border h-12 rounded-xl ${isPositionPrefilled ? "opacity-70 cursor-not-allowed" : ""}`}
-        />
-        {fieldErrors.position && (
-          <p className="text-xs text-destructive mt-1">{fieldErrors.position[0]}</p>
-        )}
+        <div className="flex gap-4">
+          <RadioOption
+            name="are_you_student"
+            value="yes"
+            label="Yes"
+            checked={form.are_you_student === "yes"}
+            onChange={() => handleStudentChange("yes")}
+          />
+          <RadioOption
+            name="are_you_student"
+            value="no"
+            label="No"
+            checked={form.are_you_student === "no"}
+            onChange={() => handleStudentChange("no")}
+          />
+        </div>
+        <FieldError errors={fieldErrors.are_you_student} />
       </motion.div>
 
-      {/* Resume Upload */}
-      <motion.div custom={5} variants={fadeIn} initial="hidden" animate="visible" className="space-y-2">
-        <Label>Resume (PDF preferred)</Label>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf"
-          onChange={handleFileChange}
-          className="hidden"
-          id="resume-upload"
-        />
-        {resume ? (
-          <div className="flex items-center gap-3 p-4 rounded-xl bg-muted/50 border border-border">
-            <FileText className="h-5 w-5 text-primary shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{resume.name}</p>
-              <p className="text-xs text-muted-foreground">{(resume.size / 1024).toFixed(1)} KB</p>
-            </div>
-            <button
-              type="button"
-              onClick={removeFile}
-              className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-          <label
-            htmlFor="resume-upload"
-            className="flex flex-col items-center justify-center gap-2 p-6 rounded-xl border-2 border-dashed border-border hover:border-primary/40 cursor-pointer transition-colors bg-muted/30 hover:bg-muted/50"
+      {/* Conditional Student Fields */}
+      <AnimatePresence>
+        {isStudent && (
+          <motion.div
+            key="student-fields"
+            variants={conditionalSlide}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="space-y-5 overflow-hidden"
           >
-            <Upload className="h-6 w-6 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">
-              Click to upload your resume (PDF, max 10 MB)
-            </span>
-          </label>
-        )}
-        {fieldErrors.resume && (
-          <p className="text-xs text-destructive mt-1">{fieldErrors.resume[0]}</p>
-        )}
-      </motion.div>
+            <div className="grid md:grid-cols-2 gap-5">
+              <div className="space-y-2">
+                <Label htmlFor="university">
+                  University <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="university"
+                  name="university"
+                  placeholder="e.g. University of Lagos"
+                  value={form.university}
+                  onChange={handleChange}
+                  className="bg-muted/50 border-border h-12 rounded-xl"
+                />
+                <FieldError errors={fieldErrors.university} />
+              </div>
 
-      {/* Cover Message */}
-      <motion.div custom={6} variants={fadeIn} initial="hidden" animate="visible" className="space-y-2">
-        <Label htmlFor="cover_message">Cover Message</Label>
+              <div className="space-y-2">
+                <Label htmlFor="department">
+                  Department <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="department"
+                  name="department"
+                  placeholder="e.g. Computer Science"
+                  value={form.department}
+                  onChange={handleChange}
+                  className="bg-muted/50 border-border h-12 rounded-xl"
+                />
+                <FieldError errors={fieldErrors.department} />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="level">
+                Level <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="level"
+                name="level"
+                placeholder="e.g. 300 Level, Final Year"
+                value={form.level}
+                onChange={handleChange}
+                className="bg-muted/50 border-border h-12 rounded-xl"
+              />
+              <FieldError errors={fieldErrors.level} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Motivation (maps to cover_message) */}
+      <motion.div
+        custom={5}
+        variants={fadeIn}
+        initial="hidden"
+        animate="visible"
+        className="space-y-2"
+      >
+        <Label htmlFor="motivation">
+          Why do you want to join the Axile team?{" "}
+          <span className="text-destructive">*</span>
+        </Label>
         <Textarea
-          id="cover_message"
-          name="cover_message"
-          placeholder="Tell us why you'd be a great fit…"
-          value={form.cover_message}
+          id="motivation"
+          name="motivation"
+          placeholder="Tell us what excites you about this role and what you hope to contribute…"
+          value={form.motivation}
           onChange={handleChange}
           className="min-h-[120px] bg-muted/50 border-border rounded-xl resize-none"
         />
-        {fieldErrors.cover_message && (
-          <p className="text-xs text-destructive mt-1">{fieldErrors.cover_message[0]}</p>
-        )}
+        <FieldError errors={fieldErrors.motivation} />
       </motion.div>
 
       {/* Submit */}
-      <motion.div custom={7} variants={fadeIn} initial="hidden" animate="visible">
+      <motion.div
+        custom={6}
+        variants={fadeIn}
+        initial="hidden"
+        animate="visible"
+      >
         <Button
           type="submit"
           disabled={submitting}
@@ -382,5 +431,47 @@ const HiringApplicationForm = ({ defaultPosition = "", defaultRoleType = "" }) =
     </form>
   );
 };
+
+/* ── Reusable sub-components ── */
+
+function FieldError({ errors }) {
+  if (!errors || errors.length === 0) return null;
+  return <p className="text-xs text-destructive mt-1">{errors[0]}</p>;
+}
+
+function RadioOption({ name, value, label, checked, onChange }) {
+  return (
+    <label
+      className={`flex items-center gap-3 px-5 py-3 rounded-xl border cursor-pointer transition-all duration-200 select-none ${
+        checked
+          ? "border-primary bg-primary/5 text-foreground"
+          : "border-border bg-muted/30 text-muted-foreground hover:border-primary/30 hover:bg-muted/50"
+      }`}
+    >
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={checked}
+        onChange={onChange}
+        className="sr-only"
+      />
+      <span
+        className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+          checked ? "border-primary" : "border-muted-foreground/40"
+        }`}
+      >
+        {checked && (
+          <motion.span
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            className="w-2 h-2 rounded-full bg-primary"
+          />
+        )}
+      </span>
+      <span className="text-sm font-medium">{label}</span>
+    </label>
+  );
+}
 
 export default HiringApplicationForm;
