@@ -9,6 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Loader2, Save, User, Mail, Calendar } from "lucide-react";
 import toast from "react-hot-toast";
 
+import { ProfileSkeleton } from "@/components/skeletons";
+
 const StudentProfile = () => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -24,7 +26,7 @@ const StudentProfile = () => {
 
   const fetchProfile = async () => {
     try {
-      const response = await api.get("/student/profile/");
+      const response = await api.get("student/profile/");
       const data = response.data.profile || response.data;
       setProfile(data);
       setFormData({
@@ -42,34 +44,49 @@ const StudentProfile = () => {
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
+    
+    // Prepare payload: convert empty strings to null for optional fields like Date_of_birth
+    const payload = {
+        Preferred_name: formData.Preferred_name,
+        Date_of_birth: formData.Date_of_birth || null // Send null if empty string
+    };
+
     try {
-      await api.patch("/student/profile/", formData);
+      await api.patch("student/profile/", payload);
       toast.success("Profile updated successfully");
-      setProfile(prev => ({...prev, ...formData}));
+      setProfile(prev => ({...prev, ...payload}));
     } catch (error) {
-      console.error(error);
-      toast.error("Failed to update profile");
+      console.error("Profile update error:", error.response?.data || error);
+      // Try to extract a meaningful error message
+      const errorData = error.response?.data;
+      let errorMsg = "Failed to update profile";
+      
+      if (errorData) {
+          if (typeof errorData === 'string') errorMsg = errorData;
+          else if (errorData.error) errorMsg = errorData.error;
+          else if (errorData.detail) errorMsg = errorData.detail;
+          else if (errorData.Date_of_birth) errorMsg = `Date of Birth: ${errorData.Date_of_birth.join(', ')}`;
+          else if (errorData.Preferred_name) errorMsg = `Preferred Name: ${errorData.Preferred_name.join(', ')}`;
+      }
+      
+      toast.error(errorMsg);
     } finally {
       setSaving(false);
     }
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-[50vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
+    return <ProfileSkeleton />;
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-4xl mx-auto space-y-5 md:space-y-8 pb-20 md:pb-0">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight mb-2">My Profile</h1>
-        <p className="text-muted-foreground">Manage your personal information and account details.</p>
+        <h1 className="text-xl md:text-3xl font-bold tracking-tight mb-1 md:mb-2">My Profile</h1>
+        <p className="text-sm md:text-base text-muted-foreground">Manage your personal information and account details.</p>
       </div>
 
-      <Card>
+      <Card className="border-gray-700/60">
         <CardHeader>
           <CardTitle>Personal Information</CardTitle>
           <CardDescription>

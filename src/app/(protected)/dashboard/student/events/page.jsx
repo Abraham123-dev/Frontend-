@@ -6,17 +6,34 @@ import { Input } from "@/components/ui/input";
 import { Loader2, MapPin, Calendar as CalendarIcon, Search, Clock } from "lucide-react";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { getImageUrl } from "@/lib/utils";
+import { EventsGridSkeleton } from "@/components/skeletons";
 
 const EventsPage = () => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [filter, setFilter] = useState("all");
+
+  const shuffleArray = (array) => {
+    let currentIndex = array.length, randomIndex;
+    while (currentIndex != 0) {
+      randomIndex = Math.floor(Math.random() * currentIndex);
+      currentIndex--;
+      [array[currentIndex], array[randomIndex]] = [
+        array[randomIndex], array[currentIndex]];
+    }
+    return array;
+  };
 
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        const response = await api.get("/create-event/");
-        setEvents(response.data);
+        const response = await api.get("/event/");
+        const eventsData = Array.isArray(response.data) ? response.data : (response.data.events || []);
+        // Only show verified events to students
+        const verifiedEvents = eventsData.filter(event => !event.status || event.status === 'verified'); 
+        setEvents(shuffleArray([...verifiedEvents]));
       } catch (error) {
         console.error("Error fetching events:", error);
       } finally {
@@ -27,16 +44,38 @@ const EventsPage = () => {
     fetchEvents();
   }, []);
 
-  const filteredEvents = events.filter((event) =>
-    event.event_name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const getFilteredAndSortedEvents = () => {
+    let filtered = events.filter((event) =>
+      event.event_name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    // Apply pricing filter
+    if (filter === 'paid') {
+      filtered = filtered.filter(event => event.pricing_type === 'paid');
+    } else if (filter === 'free') {
+      filtered = filtered.filter(event => event.pricing_type === 'free');
+    }
+
+    if (filter === 'latest') {
+       // Sort by creation date (newest created first)
+       // If created_at is available, use it. Otherwise, use event_id as a proxy for creation order (descending)
+       // or fallback to event_date.
+       return filtered.sort((a, b) => {
+          const dateA = new Date(a.created_at || a.event_date);
+          const dateB = new Date(b.created_at || b.event_date);
+          return dateB - dateA;
+       });
+    } else if (filter === 'popular') {
+       return filtered; 
+    } else {
+       return filtered;
+    }
+  };
+
+  const filteredEvents = getFilteredAndSortedEvents();
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-[50vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
+    return <EventsGridSkeleton />;
   }
 
   return (
@@ -55,6 +94,28 @@ const EventsPage = () => {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        {['all', 'latest', 'popular', 'paid', 'free'].map((f) => (
+            <button
+              key={f}
+              onClick={() => {
+                setFilter(f);
+                if (f === 'all') {
+                  setEvents(prev => shuffleArray([...prev]));
+                }
+              }}
+              className={`px-4 py-1.5 rounded-full text-xs md:text-sm font-medium capitalize transition-all duration-300 whitespace-nowrap ${
+                filter === f 
+                  ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20 scale-105" 
+                  : "bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground border border-transparent"
+              }`}
+            >
+              {f}
+            </button>
+        ))}
       </div>
 
       {/* Content */}
@@ -82,12 +143,12 @@ const EventsPage = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: index * 0.05 }}
                 >
-                  <Link href={`/dashboard/student/events/${event.event_id}`}>
-                    <div className="group relative aspect-[4/3] overflow-hidden rounded-xl md:rounded-2xl bg-muted cursor-pointer">
+                  <Link href={`/dashboard/student/events/${event.event_slug || event.event_id}`}>
+                    <div className="group relative aspect-4/3 overflow-hidden rounded-xl md:rounded-2xl bg-muted cursor-pointer">
                       {/* Background Image */}
                       {event.event_image ? (
                         <img
-                          src={event.event_image}
+                          src={getImageUrl(event.event_image)}
                           alt={event.event_name}
                           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                         />
@@ -98,7 +159,20 @@ const EventsPage = () => {
                       )}
 
                       {/* Gradient Overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+                      <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent" />
+
+                      {/* Badges */}
+                      <div className="absolute top-3 left-3 flex flex-col gap-2">
+                        <div className="px-2 py-1 rounded-lg bg-primary/90 text-white text-[10px] font-bold uppercase tracking-wider shadow-lg shadow-primary/20 w-fit">
+                          {event.event_type}
+                        </div>
+                      </div>
+
+                      <div className="absolute top-3 right-3">
+                         <div className="px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md text-[10px] font-semibold border border-gray-600/70 text-white">
+                           {event.pricing_type === 'free' ? 'Free' : `₦${event.event_price}`}
+                         </div>
+                      </div>
 
                       {/* Content Overlay */}
                       <div className="absolute bottom-0 left-0 right-0 p-4 text-white">

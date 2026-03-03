@@ -1,8 +1,32 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import api from "../../../../../lib/axios";
+import { queryKeys } from "@/lib/query-keys";
 import toast from "react-hot-toast";
+import useOrganizerStore from "../../../../../store/orgStore";
+import CustomDropdown from "@/components/ui/CustomDropdown";
+import Loading from "@/components/ui/Loading";
+import PinPromptModal from "@/components/PinPromptModal";
+import {
+  MapPin,
+  Calendar,
+  Camera,
+  ImageIcon,
+  Eye,
+  X,
+  ChevronDown,
+  CheckCircle2,
+  Ticket,
+  ArrowRight,
+  XCircle,
+  Plus,
+  Edit2,
+  Zap,
+} from "lucide-react";
+import DateTimePicker from "@/components/ui/DateTimePicker";
 
 const FALLBACK_EVENT_TYPES = [
   { value: "conference", label: "Conference" },
@@ -15,6 +39,8 @@ const FALLBACK_EVENT_TYPES = [
 
 export default function CreateEvent() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { addEvent, organization } = useOrganizerStore();
 
   const [configLoading, setConfigLoading] = useState(true);
   const [eventTypes, setEventTypes] = useState(FALLBACK_EVENT_TYPES);
@@ -31,15 +57,19 @@ export default function CreateEvent() {
     location: "",
     date: "",
     capacity: "",
-    price: "",
-    allows_seat_selection: false,
+    max_quantity_per_booking: "",
   });
+
+  const [categories, setCategories] = useState([]);
 
   const [imageFile, setImageFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [errors, setErrors] = useState({});
-  const [serverError, setServerError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [createdEventId, setCreatedEventId] = useState(null);
+  const [showPinPrompt, setShowPinPrompt] = useState(false);
+  const [pendingSubmit, setPendingSubmit] = useState(false);
 
   // Fetch config (GET /config/) and populate eventTypes/pricingTypes.
   useEffect(() => {
@@ -81,21 +111,136 @@ export default function CreateEvent() {
       setPreview(null);
       return;
     }
-    const url = URL.createObjectURL(imageFile);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
+    // Use a data: URL for preview so it works even when CSP blocks blob:.
+    if (!(imageFile instanceof File)) {
+      setPreview(null);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      setPreview(typeof result === "string" ? result : null);
+    };
+    reader.onerror = () => {
+      setPreview(null);
+      toast.error("Failed to preview image");
+    };
+
+    reader.readAsDataURL(imageFile);
+    return () => {
+      try {
+        reader.abort();
+      } catch {
+        // ignore
+      }
+    };
   }, [imageFile]);
 
   const handleChange = (key) => (e) => {
-    const value =
-      e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     setForm((s) => ({ ...s, [key]: value }));
     setErrors((p) => ({ ...p, [key]: undefined }));
   };
 
+  // const handleImage = (e) => {
+  //   const file = e.target.files?.[0];
+  //   console.log("File selected:", file);
+    
+  //   if (!file) {
+  //     console.log("No file selected");
+  //     setImageFile(null);
+  //     return;
+  //   }
+
+  //   // Validate file type
+  //   if (!file.type.startsWith('image/')) {
+  //     toast.error("Please select an image file");
+  //     console.error("Invalid file type:", file.type);
+  //     e.target.value = ''; // Reset input
+  //     return;
+  //   }
+
+  //   // Validate file size (max 5MB)
+  //   const maxSize = 5 * 1024 * 1024; // 5MB
+  //   if (file.size > maxSize) {
+  //     toast.error("Image size must be less than 5MB");
+  //     console.error("File too large:", file.size);
+  //     e.target.value = ''; // Reset input
+  //     return;
+  //   }
+
+  //   console.log("Valid image file:", file.name, file.type, file.size);
+  //   setImageFile(file);
+  // };
+
+
   const handleImage = (e) => {
-    const f = e.target.files?.[0] ?? null;
-    setImageFile(f);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type?.startsWith("image/")) {
+      toast.error("Please select an image file");
+      e.target.value = "";
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+    if (file.size > maxSize) {
+      toast.error("Image size must be less than 5MB");
+      e.target.value = "";
+      return;
+    }
+
+    setImageFile(file);
+
+    // allow re-selecting same file again
+    e.target.value = "";
+  };
+
+  const addCategory = () => {
+    setCategories([
+      ...categories,
+      {
+        name: "",
+        price: "",
+        max_tickets: "",
+        description: "",
+      },
+    ]);
+  };
+
+  const removeCategory = (index) => {
+    setCategories(categories.filter((_, i) => i !== index));
+  };
+
+  const updateCategory = (index, key, value) => {
+    const newCats = [...categories];
+    newCats[index][key] = value;
+    setCategories(newCats);
+  };
+
+  // Format number with commas for display
+  const formatPriceWithCommas = (value) => {
+    // Remove non-digit characters except decimal point
+    const cleaned = String(value).replace(/[^\d.]/g, "");
+    // Split by decimal point to handle decimals separately
+    const parts = cleaned.split(".");
+    // Format the integer part with commas
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    // Rejoin with decimal if exists
+    return parts.length > 1 ? `${parts[0]}.${parts[1]}` : parts[0];
+  };
+
+  // Handle price input change with comma formatting
+  const handlePriceChange = (index, rawValue) => {
+    // Remove commas to get raw number for storage
+    const numericValue = rawValue.replace(/,/g, "");
+    // Only allow digits and one decimal point
+    if (/^\d*\.?\d*$/.test(numericValue)) {
+      updateCategory(index, "price", numericValue);
+    }
   };
 
   const validate = () => {
@@ -107,10 +252,33 @@ export default function CreateEvent() {
     if (!form.event_type) e.event_type = "Event type is required";
     if (!form.location.trim()) e.location = "Location is required";
     if (!form.date) e.date = "Date & time is required";
-    if (form.pricing_type === "paid") {
-      if (!form.price || Number(form.price) <= 0)
-        e.price = "Price must be greater than 0";
+
+    // New behavior requested:
+    // - Free events MUST have a capacity
+    // - Paid events use ticket categories for capacity and pricing
+    if (form.pricing_type === "free") {
+      const capVal = parseInt(String(form.capacity).replace(/,/g, ""), 10);
+      if (!form.capacity || isNaN(capVal) || capVal < 1) {
+        e.capacity = "Capacity is required for free events";
+      }
+    } else {
+      // Paid event: require at least one category with a valid price
+      const nonEmptyCategories = categories.filter((c) => (c?.name || "").trim());
+      if (nonEmptyCategories.length === 0) {
+        e.categories = "At least one ticket category is required for paid events";
+      } else {
+        const invalidCategory = nonEmptyCategories.find((c) => {
+          const rawPrice = String(c?.price ?? "").trim();
+          const parsedPrice = rawPrice === "" ? NaN : Number(rawPrice);
+          return !Number.isFinite(parsedPrice) || parsedPrice <= 0;
+        });
+
+        if (invalidCategory) {
+          e.categories = "Each category must have a price greater than 0";
+        }
+      }
     }
+
     // length checks per docs
     if (form.name && form.name.length > 200)
       e.name = "Name must be ≤ 200 characters";
@@ -130,20 +298,37 @@ export default function CreateEvent() {
       location: "",
       date: "",
       capacity: "",
-      price: "",
-      allows_seat_selection: false,
+      max_quantity_per_booking: "",
     });
     setImageFile(null);
     setPreview(null);
     setErrors({});
-    setServerError("");
+    setCategories([]);
   };
+
+
 
   const submit = async (ev) => {
     ev.preventDefault();
-    setServerError("");
-    if (!validate()) return;
+    if (!validate()) {
+      toast.error("Please fill in all required fields correctly.");
+      return;
+    }
+
+    // Check if PIN is set from database
+    if (!organization?.has_pin) {
+      toast.error('Please set up your PIN first from the dashboard');
+      return;
+    }
+
+    // Require PIN verification before creating event
+    setPendingSubmit(true);
+    setShowPinPrompt(true);
+  };
+
+  const executeCreateEvent = async () => {
     setLoading(true);
+    setPendingSubmit(false);
 
     try {
       const formData = new FormData();
@@ -153,39 +338,92 @@ export default function CreateEvent() {
       formData.append("event_type", form.event_type);
       formData.append("location", form.location.trim());
 
-      // convert local datetime input to ISO with Z (server expects ISO 8601)
-      // if user already provided an ISO string, this will still produce a valid ISO
+      // convert local datetime input to ISO with Z
       const isoDate = form.date ? new Date(form.date).toISOString() : "";
       formData.append("date", isoDate);
-
-      if (form.capacity !== "" && form.capacity !== null) {
-        // ensure integer
-        formData.append("capacity", parseInt(form.capacity, 10));
-      }
-      // price required for paid; for free set 0.00 per docs
-      if (form.pricing_type === "paid") {
-        formData.append("price", parseFloat(form.price));
-      } else {
-        // append price 0 for free events (server may require)
-        formData.append("price", 0.0);
-      }
-
-      formData.append(
-        "allows_seat_selection",
-        form.allows_seat_selection ? "true" : "false"
-      );
 
       if (imageFile) {
         formData.append("image", imageFile);
       }
 
-      const res = await api.post("/create-event/", formData);
+      // Add max_quantity_per_booking if provided (defaults to 3 on backend)
+      if (form.max_quantity_per_booking) {
+        formData.append("max_quantity_per_booking", form.max_quantity_per_booking);
+      }
+
+      // IMPORTANT: don't set Content-Type for FormData; the browser will add the correct boundary.
+      const res = await api.post("/event/", formData);
+
 
       if (res && res.status >= 200 && res.status < 300) {
-        toast.success("Event created successfully");
-        resetForm();
+        const newId = res.data.event_id || res.data.id;
+
+        // If backend hasn't propagated the image URL yet, keep the selected image
+        // so the organizer can still see the correct cover immediately in My Events.
+        if (newId && preview) {
+          try {
+            sessionStorage.setItem(`created-event-image:${newId}`, preview);
+          } catch {
+            // ignore storage failures (private mode, quota, etc.)
+          }
+        }
+
+        // Create categories (required by migration)
+          const categoriesToCreate =
+            form.pricing_type === "free"
+              ? [
+                  {
+                    name: "General",
+                    price: 0,
+                    max_tickets: form.capacity,
+                  },
+                ]
+              : categories;
+
+          if (categoriesToCreate.length > 0) {
+          try {
+            await Promise.all(
+                categoriesToCreate.map((cat) => {
+                  if (!cat.name) return Promise.resolve();
+
+                const rawPrice = String(cat.price ?? "").trim();
+                const parsedPrice = rawPrice === "" ? 0 : parseFloat(String(cat.price).replace(/,/g, ""));
+                // Round to 2 decimal places to avoid floating-point precision issues
+                const catPrice = Math.round(parsedPrice * 100) / 100;
+                const catMaxTickets = cat.max_tickets
+                  ? parseInt(String(cat.max_tickets).replace(/,/g, ""), 10)
+                  : null;
+                
+                const categoryPayload = {
+                  event_id: newId,
+                  name: cat.name,
+                  price: !isNaN(catPrice) ? catPrice : 0,
+                  max_tickets: !isNaN(catMaxTickets) ? catMaxTickets : null,
+                };
+                
+                // Include description if provided
+                if (cat.description?.trim()) {
+                  categoryPayload.description = cat.description.trim();
+                }
+                
+                return api.post("/tickets/categories/create/", categoryPayload);
+              })
+            );
+          } catch (catErr) {
+            console.error("Error creating categories:", catErr);
+            toast.error(
+              "Event created, but some ticket categories failed to create. You can add them later."
+            );
+          }
+        }
+
+        setCreatedEventId(newId);
+        setShowSuccessModal(true);
+        queryClient.invalidateQueries({ queryKey: queryKeys.organizer.events });
+        queryClient.invalidateQueries({ queryKey: queryKeys.organizer.dashboard });
+        // resetForm();
       } else {
-        setServerError(`Unexpected server response: ${res?.status}`);
+        toast.error(`Unexpected server response: ${res?.status}`);
       }
     } catch (err) {
       const msg =
@@ -194,7 +432,7 @@ export default function CreateEvent() {
         (err?.response?.data ? JSON.stringify(err.response.data) : null) ||
         err?.message ||
         "Failed to create event";
-      setServerError(msg);
+      toast.error(msg);
       console.error("Create event error:", err?.response || err);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
@@ -211,382 +449,643 @@ export default function CreateEvent() {
     }
   };
 
-  return (
-    <main
-      className="min-h-screen text-slate-100"
-      style={{
-        background:
-          "var(--sidebar-bg, linear-gradient(180deg,#05060a 0%, #000 100%))",
-        color: "var(--text-color, #e6eef8)",
-      }}
-    >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div
-          className="rounded-2xl overflow-hidden shadow-2xl border"
-          style={{
-            borderColor: "var(--sidebar-accent, rgba(148,163,184,0.06))",
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))",
-            backdropFilter: "blur(6px)",
-          }}
-        >
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Form */}
-            <section className="p-6 sm:p-8 lg:p-10">
-              <header className="mb-6">
-                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-                  Create event
-                </h1>
-                <p className="mt-1 text-sm text-slate-400">
-                  Fill in event details.{" "}
-                  <span className="text-rose-500">*</span> required.
-                </p>
-              </header>
-
-              <form onSubmit={submit} className="space-y-5" noValidate>
-                {serverError && (
-                  <div className="rounded-md bg-rose-900/30 border border-rose-800 p-3 text-rose-200 text-sm">
-                    {serverError}
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-300">
-                    Name <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    value={form.name}
-                    onChange={handleChange("name")}
-                    placeholder="Event name"
-                    aria-invalid={!!errors.name}
-                    className={`mt-2 w-full rounded-xl bg-transparent border border-slate-800/60 px-3 py-3 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-(--sidebar-accent,#5b21b6) ${errors.name ? "ring-rose-500" : ""}`}
-                  />
-                  {errors.name && (
-                    <p className="mt-1 text-xs text-rose-400">{errors.name}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-300">
-                    Description <span className="text-rose-500">*</span>
-                  </label>
-                  <textarea
-                    value={form.description}
-                    onChange={handleChange("description")}
-                    placeholder="What to expect, schedule, speakers..."
-                    aria-invalid={!!errors.description}
-                    className={`mt-2 w-full rounded-xl bg-transparent border border-slate-800/60 px-3 py-3 text-sm min-h-[120px] resize-y placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--sidebar-accent, #5b21b6)] ${errors.description ? "ring-rose-500" : ""}`}
-                  />
-                  {errors.description && (
-                    <p className="mt-1 text-xs text-rose-400">
-                      {errors.description}
-                    </p>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300">
-                      Pricing <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="mt-2 flex items-center gap-4">
-                      {pricingTypes.map((p) => (
-                        <label
-                          key={p.value}
-                          className="inline-flex items-center gap-2 cursor-pointer text-sm"
-                        >
-                          <input
-                            type="radio"
-                            name="pricing"
-                            value={p.value}
-                            checked={form.pricing_type === p.value}
-                            onChange={() =>
-                              setForm((s) => ({
-                                ...s,
-                                pricing_type: p.value,
-                                price: p.value === "free" ? "" : s.price,
-                              }))
-                            }
-                            className="h-4 w-4 accent-(--sidebar-accent,#7c3aed)"
-                          />
-                          {p.label}
-                        </label>
-                      ))}
-                    </div>
-                    {errors.pricing_type && (
-                      <p className="mt-1 text-xs text-rose-400">
-                        {errors.pricing_type}
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300">
-                      Event type <span className="text-rose-500">*</span>
-                    </label>
-                    <select
-                      value={form.event_type}
-                      onChange={handleChange("event_type")}
-                      className="mt-2 w-full rounded-xl bg-transparent border border-slate-800/60 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-(--sidebar-accent,#5b21b6)"
-                    >
-                      {eventTypes.map((t) => (
-                        <option
-                          key={t.value}
-                          value={t.value}
-                          className="bg-slate-900 text-slate-200"
-                        >
-                          {t.label}
-                        </option>
-                      ))}
-                    </select>
-                    {configLoading && (
-                      <p className="mt-1 text-xs text-slate-500">
-                        Loading types…
-                      </p>
-                    )}
-                    {errors.event_type && (
-                      <p className="mt-1 text-xs text-rose-400">
-                        {errors.event_type}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300">
-                      Location <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      value={form.location}
-                      onChange={handleChange("location")}
-                      placeholder="Venue address or online link"
-                      aria-invalid={!!errors.location}
-                      className="mt-2 w-full rounded-xl bg-transparent border border-slate-800/60 px-3 py-3 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-(--sidebar-accent,#5b21b6)"
-                    />
-                    {errors.location && (
-                      <p className="mt-1 text-xs text-rose-400">
-                        {errors.location}
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300">
-                      Date &amp; time <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={form.date}
-                      onChange={handleChange("date")}
-                      aria-invalid={!!errors.date}
-                      className="mt-2 w-full rounded-xl bg-transparent border border-slate-800/60 px-3 py-3 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-(--sidebar-accent,#5b21b6)"
-                    />
-                    {errors.date && (
-                      <p className="mt-1 text-xs text-rose-400">
-                        {errors.date}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300">
-                      Capacity (optional)
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={form.capacity}
-                      onChange={handleChange("capacity")}
-                      placeholder="e.g. 200"
-                      className="mt-2 w-full rounded-xl bg-transparent border border-slate-800/60 px-3 py-3 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-(--sidebar-accent,#5b21b6)"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300">
-                      Price{" "}
-                      {form.pricing_type === "paid" && (
-                        <span className="text-rose-500">*</span>
-                      )}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.price}
-                      onChange={handleChange("price")}
-                      placeholder={
-                        form.pricing_type === "paid"
-                          ? "Amount"
-                          : "Not required for free"
-                      }
-                      disabled={form.pricing_type === "free"}
-                      className="mt-2 w-full rounded-xl bg-transparent border border-slate-800/60 px-3 py-3 text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-(--sidebar-accent,#5b21b6) disabled:opacity-40"
-                    />
-                    {errors.price && (
-                      <p className="mt-1 text-xs text-rose-400">
-                        {errors.price}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div className="flex-1">
-                    <label className="block text-sm font-medium text-slate-300">
-                      Poster / image (optional)
-                    </label>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImage}
-                      className="mt-2 text-sm text-slate-400"
-                    />
-                    {preview && (
-                      <img
-                        src={preview}
-                        alt="preview"
-                        className="mt-3 h-36 w-full sm:w-56 rounded-md object-cover border border-slate-800/60"
-                      />
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-2 text-sm text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={form.allows_seat_selection}
-                        onChange={handleChange("allows_seat_selection")}
-                        className="h-4 w-4 accent-(--sidebar-accent,#7c3aed)"
-                      />
-                      Allow seat selection
-                    </label>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 justify-end pt-2">
-                  <button
-                    type="button"
-                    onClick={() => router.back()}
-                    disabled={loading}
-                    className="px-4 py-2 rounded-lg border border-slate-800 bg-transparent text-slate-300 hover:bg-slate-800/40"
-                  >
-                    Cancel
-                  </button>
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="px-5 py-2 rounded-lg bg-var(--sidebar-accent,#7c3aed) text-white hover:brightness-95 disabled:opacity-60"
-                  >
-                    {loading ? "Creating..." : "Create event"}
-                  </button>
-                </div>
-              </form>
-            </section>
-
-            {/* Preview */}
-            <aside className="p-6 sm:p-8 lg:p-10 border-l border-slate-800/60 bg-linear-to-t from-black/30 to-transparent">
-              <div className="sticky top-6">
-                <h2 className="text-lg font-medium text-slate-100">
-                  Live preview
-                </h2>
-
-                <div className="mt-4 rounded-xl overflow-hidden border border-slate-800 bg-slate-900 shadow-sm">
-                  {preview ? (
-                    <div className="h-44 sm:h-56 w-full overflow-hidden bg-slate-800">
-                      <img
-                        src={preview}
-                        alt="poster"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  ) : (
-                    <div className="h-44 sm:h-56 w-full flex items-center justify-center bg-linear-to-r from-indigo-900 to-slate-900 text-slate-400">
-                      <span className="text-sm">No poster</span>
-                    </div>
-                  )}
-
-                  <div className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h3 className="text-lg font-semibold text-slate-100">
-                          {form.name || "Event title"}
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-1">
-                          {eventTypes.find((t) => t.value === form.event_type)
-                            ?.label || form.event_type}{" "}
-                          • {form.pricing_type === "paid" ? "Paid" : "Free"}
-                        </p>
-                      </div>
-
-                      <div className="text-right">
-                        <p className="text-sm font-medium text-slate-100">
-                          {form.pricing_type === "paid" && form.price
-                            ? `${form.price}`
-                            : form.pricing_type === "paid"
-                              ? "Price"
-                              : "Free"}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                          {formattedDate(form.date)}
-                        </p>
-                      </div>
-                    </div>
-
-                    <p className="mt-3 text-sm text-slate-300 line-clamp-4">
-                      {form.description ||
-                        "Event description preview will appear here."}
-                    </p>
-
-                    <div className="mt-4 grid grid-cols-1 gap-2 text-sm text-slate-300">
-                      <div>
-                        <strong className="text-slate-200">Location: </strong>
-                        <span>{form.location || "TBD"}</span>
-                      </div>
-                      <div>
-                        <strong className="text-slate-200">Capacity: </strong>
-                        <span>{form.capacity || "Unlimited"}</span>
-                      </div>
-                      <div>
-                        <strong className="text-slate-200">
-                          Seat selection:{" "}
-                        </strong>
-                        <span>
-                          {form.allows_seat_selection ? "Enabled" : "Disabled"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex gap-2">
-                      <button
-                        disabled
-                        className="px-3 py-1 rounded bg-(--sidebar-accent,#7c3aed) text-white text-sm"
-                      >
-                        Preview
-                      </button>
-                      <button
-                        disabled
-                        className="px-3 py-1 rounded border border-slate-800 text-sm"
-                      >
-                        Share
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <p className="mt-4 text-xs text-slate-500">
-                  Preview updates live as you fill the form. Images are local
-                  previews until submission.
-                </p>
-              </div>
-            </aside>
+  if (configLoading) {
+    return (
+      <div className="min-h-screen p-4 md:p-8 space-y-10 max-w-7xl mx-auto text-white">
+        {/* Header Skeleton */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <div className="h-7 w-40 bg-white/5 rounded-lg animate-pulse mb-2" />
+            <div className="h-4 w-56 bg-white/5 rounded animate-pulse" />
           </div>
+          <div className="h-8 w-16 bg-white/5 rounded animate-pulse" />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Form Section Skeleton */}
+          <section className="bg-[#0A0A0A] border border-white/5 rounded-2xl p-6 md:p-8 shadow-xl space-y-6">
+            {/* Event Name */}
+            <div className="space-y-2">
+              <div className="h-3 w-24 bg-white/5 rounded animate-pulse" />
+              <div className="h-12 w-full bg-white/5 rounded-xl animate-pulse" />
+            </div>
+            
+            {/* Description */}
+            <div className="space-y-2">
+              <div className="h-3 w-20 bg-white/5 rounded animate-pulse" />
+              <div className="h-32 w-full bg-white/5 rounded-xl animate-pulse" />
+            </div>
+            
+            {/* Pricing & Type Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <div className="h-3 w-16 bg-white/5 rounded animate-pulse" />
+                <div className="h-12 w-full bg-white/5 rounded-xl animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-20 bg-white/5 rounded animate-pulse" />
+                <div className="h-12 w-full bg-white/5 rounded-xl animate-pulse" />
+              </div>
+            </div>
+            
+            {/* Location & Date Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <div className="h-3 w-16 bg-white/5 rounded animate-pulse" />
+                <div className="h-12 w-full bg-white/5 rounded-xl animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 w-24 bg-white/5 rounded animate-pulse" />
+                <div className="h-12 w-full bg-white/5 rounded-xl animate-pulse" />
+              </div>
+            </div>
+            
+            {/* Image Upload */}
+            <div className="space-y-2">
+              <div className="h-3 w-20 bg-white/5 rounded animate-pulse" />
+              <div className="h-40 w-full bg-white/5 rounded-xl animate-pulse" />
+            </div>
+            
+            {/* Submit Button */}
+            <div className="h-12 w-full bg-white/5 rounded-xl animate-pulse" />
+          </section>
+
+          {/* Preview Section Skeleton */}
+          <section className="bg-[#0A0A0A] border border-white/5 rounded-2xl p-6 md:p-8 shadow-xl space-y-6">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="h-5 w-5 bg-white/5 rounded animate-pulse" />
+              <div className="h-5 w-32 bg-white/5 rounded animate-pulse" />
+            </div>
+            
+            {/* Preview Image */}
+            <div className="h-48 w-full bg-white/5 rounded-xl animate-pulse" />
+            
+            {/* Preview Details */}
+            <div className="space-y-4">
+              <div className="h-6 w-3/4 bg-white/5 rounded animate-pulse" />
+              <div className="h-4 w-full bg-white/5 rounded animate-pulse" />
+              <div className="h-4 w-2/3 bg-white/5 rounded animate-pulse" />
+              
+              <div className="flex gap-4 pt-4">
+                <div className="h-4 w-24 bg-white/5 rounded animate-pulse" />
+                <div className="h-4 w-24 bg-white/5 rounded animate-pulse" />
+              </div>
+            </div>
+          </section>
         </div>
       </div>
-    </main>
+    );
+  }
+
+  return (
+    <div className="min-h-screen p-4 md:p-8 space-y-10 max-w-7xl mx-auto text-white">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold mb-1">Create Event</h1>
+          <p className="text-gray-400 text-xs">
+            Fill in event details. <span className="text-rose-500">*</span>{" "}
+            required.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="text-xs font-semibold text-gray-500 hover:text-white transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Form Section */}
+        <section className="bg-[#0A0A0A] border border-white/5 rounded-2xl p-6 md:p-8 shadow-xl">
+          <form onSubmit={submit} className="space-y-6" noValidate>
+            {/* No more serverError div */}
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                Event Name <span className="text-rose-500">*</span>
+              </label>
+              <input
+                value={form.name}
+                onChange={handleChange("name")}
+                placeholder="e.g. Summer Tech Conference 2024"
+                className={`w-full bg-white/5 border ${errors.name ? "border-rose-500/50 focus:border-rose-500" : "border-white/10 focus:border-rose-500"} rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-rose-500 transition-all`}
+              />
+              {errors.name && (
+                <p className="text-[10px] text-rose-500 font-bold">
+                  {errors.name}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                Description <span className="text-rose-500">*</span>
+              </label>
+              <textarea
+                value={form.description}
+                onChange={handleChange("description")}
+                placeholder="What to expect, schedule, speakers..."
+                className={`w-full bg-white/5 border ${errors.description ? "border-rose-500/50 focus:border-rose-500" : "border-white/10 focus:border-rose-500"} rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-rose-500 transition-all min-h-[120px] resize-y`}
+              />
+              {errors.description && (
+                <p className="text-[10px] text-rose-500 font-bold">
+                  {errors.description}
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                  Pricing <span className="text-rose-500">*</span>
+                </label>
+                <div className="flex bg-white/5 p-1 rounded-xl border border-white/10">
+                  {pricingTypes.map((p) => (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() =>
+                        {
+                          setForm((s) => ({
+                            ...s,
+                            pricing_type: p.value,
+                            // Capacity is only for free events
+                            capacity: p.value === "paid" ? "" : s.capacity,
+                          }));
+                          setErrors((prev) => ({
+                            ...prev,
+                            pricing_type: undefined,
+                            capacity: undefined,
+                            categories: undefined,
+                          }));
+                          if (p.value === "free") {
+                            // Simplify free event flow: capacity-driven single category
+                            setCategories([]);
+                          }
+                        }
+                      }
+                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${form.pricing_type === p.value ? "bg-rose-600 text-white shadow-lg" : "text-gray-400 hover:text-white"}`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <CustomDropdown
+                value={form.event_type}
+                onChange={(val) => {
+                  setForm((s) => ({ ...s, event_type: val }));
+                  setErrors((p) => ({ ...p, event_type: undefined }));
+                }}
+                options={eventTypes.map((t) => ({
+                  value: t.value || t,
+                  label: t.label || t,
+                  icon: Zap,
+                }))}
+                placeholder="Select Type"
+                error={errors.event_type}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                  Location <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    value={form.location}
+                    onChange={handleChange("location")}
+                    placeholder="Venue address or online link"
+                    className={`w-full pl-10 bg-white/5 border ${errors.location ? "border-rose-500/50 focus:border-rose-500" : "border-white/10 focus:border-rose-500"} rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-rose-500 transition-all`}
+                  />
+                  <MapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                </div>
+                {errors.location && (
+                  <p className="text-[10px] text-rose-500 font-bold">
+                    {errors.location}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                  Date & Time <span className="text-rose-500">*</span>
+                </label>
+                <DateTimePicker
+                  selected={form.date}
+                  onChange={(value) => setForm(prev => ({ ...prev, date: value }))}
+                  placeholder="Select event date and time"
+                  hasError={!!errors.date}
+                />
+                {errors.date && (
+                  <p className="text-[10px] text-rose-500 font-bold">
+                    {errors.date}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              {form.pricing_type === "free" && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    Capacity <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.capacity}
+                    onChange={handleChange("capacity")}
+                    placeholder="e.g. 100"
+                    className={`w-full bg-white/5 border ${errors.capacity ? "border-rose-500/50 focus:border-rose-500" : "border-white/10 focus:border-rose-500"} rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-rose-500 transition-all`}
+                  />
+                  {errors.capacity && (
+                    <p className="text-[10px] text-rose-500 font-bold">
+                      {errors.capacity}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-gray-500 font-medium">
+                    Free events require a capacity. This becomes the max tickets for the default “General” category.
+                  </p>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                  Max Tickets Per Booking
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={form.max_quantity_per_booking}
+                  onChange={handleChange("max_quantity_per_booking")}
+                  placeholder="Default: 3"
+                  className="w-full bg-white/5 border border-white/10 focus:border-rose-500 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-rose-500 transition-all"
+                />
+                <p className="text-[10px] text-gray-500 font-medium">
+                  Maximum number of tickets a user can purchase in a single booking. Defaults to 3 if not set.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                  Cover Image {imageFile && <span className="text-rose-500">• Selected: {imageFile.name}</span>}
+                </label>
+                <div className="relative group cursor-pointer border-2 border-dashed border-white/10 rounded-2xl hover:border-rose-500/50 hover:bg-rose-500/5 transition-all h-32 flex flex-col items-center justify-center text-center">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImage}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  />
+                  <div className="pointer-events-none flex flex-col items-center">
+                    <Camera className="w-8 h-8 mb-2 text-gray-500 group-hover:text-rose-400 transition-colors" />
+                    <span className="text-xs text-gray-500 group-hover:text-rose-400 font-medium">
+                      Click to upload cover image
+                    </span>
+                    <span className="text-[10px] text-gray-600 mt-1">
+                      PNG, JPG up to 5MB
+                    </span>
+                  </div>
+                </div>
+                {preview && (
+                  <div className="relative h-40 w-full rounded-2xl overflow-hidden border border-white/10 mt-3 group">
+                    <img
+                      src={preview}
+                      alt="preview"
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageFile(null);
+                        setPreview(null);
+                      }}
+                      className="absolute top-2 right-2 bg-black/60 hover:bg-rose-600 text-white p-1.5 rounded-lg backdrop-blur-md transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Ticket Categories Section */}
+              {form.pricing_type === "paid" && (
+                <div className="space-y-4 pt-4 border-t border-white/5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Ticket className="w-4 h-4 text-rose-500" />
+                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
+                      Ticket Categories
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addCategory}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600/10 hover:bg-rose-600/20 text-rose-500 rounded-lg text-[10px] font-bold transition-all border border-rose-500/20 group"
+                  >
+                    <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                    ADD CATEGORY
+                  </button>
+                </div>
+
+                {categories.length === 0 ? (
+                  <div className="bg-white/5 border border-white/5 rounded-xl p-6 text-center">
+                    <p className="text-[10px] text-gray-500 font-medium">
+                      No ticket categories added. Events must have at least one ticket category.
+                    </p>
+                    {errors.categories && (
+                      <p className="text-[10px] text-rose-500 font-bold mt-2">
+                        {errors.categories}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {categories.map((cat, idx) => (
+                      <div
+                        key={idx}
+                        className="relative bg-white/5 border border-white/10 rounded-xl p-4 space-y-4 group"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => removeCategory(idx)}
+                          className="absolute top-3 right-3 p-1.5 bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white rounded-lg transition-all"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                              Category Name{" "}
+                              <span className="text-rose-500">*</span>
+                            </label>
+                            <input
+                              value={cat.name}
+                              onChange={(e) =>
+                                updateCategory(idx, "name", e.target.value)
+                              }
+                              placeholder="e.g. VIP, Early Bird"
+                              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 transition-all"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                              Price (₦) <span className="text-rose-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={formatPriceWithCommas(cat.price)}
+                              onChange={(e) =>
+                                handlePriceChange(idx, e.target.value)
+                              }
+                              placeholder="0.00"
+                              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 transition-all"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                              Max Tickets
+                            </label>
+                            <input
+                              type="number"
+                              value={cat.max_tickets}
+                              onChange={(e) =>
+                                updateCategory(
+                                  idx,
+                                  "max_tickets",
+                                  e.target.value
+                                )
+                              }
+                              placeholder="Unlimited"
+                              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 transition-all"
+                            />
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex justify-between">
+                              <span>Description</span>
+                              <span className={`${(cat.description?.length || 0) > 140 ? 'text-rose-500' : 'text-gray-600'}`}>
+                                {cat.description?.length || 0}/150
+                              </span>
+                            </label>
+                            <textarea
+                              value={cat.description || ""}
+                              onChange={(e) =>
+                                updateCategory(idx, "description", e.target.value)
+                              }
+                              maxLength={150}
+                              placeholder="Describe what this ticket includes (e.g., Front row seats, Backstage access)"
+                              rows={2}
+                              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 transition-all resize-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-rose-600/20 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-4"
+            >
+              {loading ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                  Creating Event...
+                </>
+              ) : (
+                "Create Event"
+              )}
+            </button>
+          </form>
+        </section>
+
+        {/* Live Preview Section */}
+        <section className="space-y-4">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-1.5 bg-white/5 rounded-lg">
+              <Eye className="w-4 h-4 text-rose-500" />
+            </div>
+            <h2 className="text-lg font-bold">Live Preview</h2>
+          </div>
+
+          {/* Preview Card */}
+          <div className="bg-[#0A0A0A] border border-white/5 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="h-48 relative overflow-hidden bg-white/5">
+              {preview || imageFile ? (
+                <img
+                  src={preview}
+                  alt="poster"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center text-gray-700 gap-2">
+                  <ImageIcon className="w-10 h-10" />
+                  <span className="text-xs font-bold uppercase tracking-wider">
+                    No Cover Image
+                  </span>
+                </div>
+              )}
+              <div className="absolute top-3 right-3">
+                <span
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold backdrop-blur-md border ${
+                    form.pricing_type === "free"
+                      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                      : "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                  }`}
+                >
+                  {form.pricing_type === "paid" ? "PAID" : "FREE"}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <div>
+                <h3 className="text-xl font-bold line-clamp-2 leading-tight">
+                  {form.name || "Untitled Event"}
+                </h3>
+                <p className="text-rose-500 text-xs font-bold mt-2 uppercase tracking-wider">
+                  {eventTypes.find((t) => t.value === form.event_type)?.label ||
+                    form.event_type ||
+                    "Event Type"}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-gray-400 text-xs font-medium">
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>{formattedDate(form.date)}</span>
+                </div>
+                <div className="flex items-center gap-2 text-gray-400 text-xs font-medium">
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>{form.location || "Location TBD"}</span>
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-400 line-clamp-3 leading-relaxed">
+                {form.description || "Description will appear here..."}
+              </p>
+
+              <div className="pt-4 border-t border-white/5 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] text-gray-500 font-bold uppercase">
+                    Price
+                  </p>
+                  <p className="text-white font-bold text-lg">
+                    {(() => {
+                      if (form.pricing_type === "free") return "Free";
+                      const prices = categories
+                        .filter((c) => (c?.name || "").trim())
+                        .map((c) => Number(String(c?.price ?? "").trim() || 0))
+                        .filter((n) => Number.isFinite(n) && n >= 0);
+                      if (!prices.length) return "Paid";
+                      const minPrice = Math.min(...prices);
+                      return `From ₦${minPrice.toLocaleString()}`;
+                    })()}
+                  </p>
+                </div>
+                <button
+                  disabled
+                  className="px-4 py-2 bg-white/5 text-gray-500 rounded-lg text-xs font-bold cursor-default"
+                >
+                  Get Tickets
+                </button>
+              </div>
+
+              {/* Categories Preview */}
+              {categories.length > 0 && (
+                <div className="space-y-2 mt-4">
+                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                    Available Tickets
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {categories.map(
+                      (cat, i) =>
+                        cat.name && (
+                          <div
+                            key={i}
+                            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg flex items-center gap-2"
+                          >
+                            <span className="text-[10px] font-bold text-gray-300">
+                              {cat.name}
+                            </span>
+                            <span className="text-[10px] font-black text-rose-500">
+                              ₦{formatPriceWithCommas(cat.price) || "0"}
+                            </span>
+                          </div>
+                        )
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-rose-500/5 border border-rose-500/10 rounded-xl p-4 text-xs text-rose-300 font-medium text-center">
+            Values update in real-time as you type.
+          </div>
+        </section>
+      </div>
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-[#0A0A0A] border border-white/10 rounded-3xl p-8 max-w-md w-full shadow-2xl space-y-6 transform animate-in zoom-in-95 duration-300">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mb-2">
+                <CheckCircle2 className="w-16 h-16 text-emerald-500 mb-4" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">Event Created & Pending</h2>
+              <p className="text-gray-400 text-center max-w-md">
+                Your event has been successfully created and is currently pending approval. An email will be delivered to you once your event is approved and is live.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <button
+                onClick={() => {
+                  resetForm();
+                  router.push("/dashboard/org/my-event");
+                }}
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white py-3.5 rounded-2xl font-bold transition-all shadow-lg shadow-rose-600/20 flex items-center justify-center gap-2"
+              >
+                Go to My Events
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PIN Prompt Modal */}
+      <PinPromptModal
+        isOpen={showPinPrompt}
+        onClose={() => {
+          setShowPinPrompt(false);
+          setPendingSubmit(false);
+        }}
+        onSuccess={() => {
+          setShowPinPrompt(false);
+          executeCreateEvent();
+        }}
+        action="create event"
+        requireSetup={true}
+      />
+    </div>
   );
 }

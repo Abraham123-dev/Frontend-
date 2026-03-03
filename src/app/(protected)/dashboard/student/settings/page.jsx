@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Loader2, Check, Save } from "lucide-react";
 import toast from "react-hot-toast";
 import { motion } from "framer-motion";
+import { ProfileSkeleton } from "@/components/skeletons";
 
 const StudentSettings = () => {
   const [preferences, setPreferences] = useState([]);
@@ -18,8 +19,8 @@ const StudentSettings = () => {
     const fetchData = async () => {
       try {
         const [configRes, profileRes] = await Promise.all([
-          api.get("/config/"),
-          api.get("/student/profile/")
+          api.get("config/"),
+          api.get("student/profile/")
         ]);
 
         if (configRes.data && configRes.data.event_types) {
@@ -57,7 +58,7 @@ const StudentSettings = () => {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.patch("/student/profile/", {
+      await api.patch("student/profile/", {
         event_preferences: preferences
       });
       toast.success("Preferences updated successfully");
@@ -70,17 +71,13 @@ const StudentSettings = () => {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-[50vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
+    return <ProfileSkeleton />;
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-4xl mx-auto space-y-5 md:space-y-8 pb-20 md:pb-0">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight mb-2">Settings</h1>
+        <h1 className="text-xl md:text-3xl font-bold tracking-tight mb-1 md:mb-2">Settings</h1>
         <p className="text-muted-foreground">Customize your experience and preferences.</p>
       </div>
 
@@ -104,7 +101,7 @@ const StudentSettings = () => {
                     relative flex items-center justify-center p-4 rounded-xl border text-sm font-medium transition-all duration-200
                     ${isSelected 
                       ? "bg-primary/20 border-primary text-primary" 
-                      : "bg-white/5 border-white/10 text-gray-400 hover:border-white/20 hover:bg-white/10"
+                      : "bg-white/5 border-gray-700/60 text-gray-400 hover:border-gray-600/80 hover:bg-white/10"
                     }
                   `}
                 >
@@ -123,7 +120,7 @@ const StudentSettings = () => {
             })}
           </div>
 
-          <div className="flex justify-end pt-4 border-t border-white/5">
+          <div className="flex justify-end pt-4 border-t border-gray-700/40">
             <Button onClick={handleSave} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Preferences

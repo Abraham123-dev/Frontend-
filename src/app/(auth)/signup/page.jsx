@@ -1,18 +1,24 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "../../../components/ui/button";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import Link from "next/link";
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 import api from "../../../lib/axios";
 import useAuthStore from "../../../store/authStore";
-import { Mail, Lock, User, Eye, EyeOff, UsersIcon, Loader2, ArrowRight } from "lucide-react";
+import { useGoogleLogin } from '@react-oauth/google';
+import { Mail, Lock, User, Eye, EyeOff, UsersIcon, Loader2, ArrowRight, Phone } from "lucide-react";
 import Logo from "@/components/Logo";
+import BackgroundCarousel from "../../../components/BackgroundCarousel";
+import axios from 'axios';
 
-const SignUp = () => {
+const SignUpContent = () => {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl");
   const loginUser = useAuthStore((state) => state.login);
 
   const [role, setRole] = useState("student");
@@ -25,6 +31,7 @@ const SignUp = () => {
 
   const [organisationName, setOrganisationName] = useState("");
   const [organiserEmail, setOrganiserEmail] = useState("");
+  const [organiserPhone, setOrganiserPhone] = useState("");
   const [organiserPassword, setOrganiserPassword] = useState("");
   const [organiserConfirm, setOrganiserConfirm] = useState("");
 
@@ -41,6 +48,22 @@ const SignUp = () => {
   const organiserPasswordMismatch =
     organiserConfirm.length > 0 && organiserConfirm !== organiserPassword;
 
+ 
+  const validatePhone = (phone) => {
+    const phoneRegex = /^(\+234|234|0)(7\d|8\d|9\d)\d{8}$/;
+    return phoneRegex.test(phone.replace(/\s+/g, ''));
+  };
+
+  const invalidPhone = organiserPhone.length > 0 && !validatePhone(organiserPhone);
+
+  // Check URL parameter to auto-select organizer tab
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'organizer') {
+      setRole('Organizer');
+    }
+  }, [searchParams]);
+
   const isFormValid = () => {
     if (role === "student") {
       return (
@@ -53,11 +76,11 @@ const SignUp = () => {
       return (
         organisationName.trim() &&
         organiserEmail.trim() &&
-        organiserPassword.length >= 6 
+        organiserPhone.trim() &&
+        organiserPassword.length >= 6
       );
     }
   };
-
 
 
   const submitForm = async (e) => {
@@ -83,23 +106,24 @@ const SignUp = () => {
           Organization_Name: organisationName,
           Email: organiserEmail,
           Password: organiserPassword,
-          Phone: "", // Add phone field if needed in form
+          Phone: organiserPhone,
         };
         endpoint = "/organizer/register/";
       }
-      
+
       console.log("Submitting to", endpoint, "with payload", payload);
       const res = await api.post(endpoint, payload);
-      
-      if (role === "student") {
-         toast.success(res.data.message || 'OTP sent to email.', { id: toastId })
-         router.push(`/verify-otp?email=${email}`);
+
+      // Both student and organizer now require OTP verification
+      toast.success(res.data.message || 'OTP sent to email.', { id: toastId });
+      if (role === "Student") {
+        let redirectUrl = `/verify-otp?email=${email}&role=student`;
+        if (callbackUrl) redirectUrl += `&callbackUrl=${encodeURIComponent(callbackUrl)}`;
+        router.push(redirectUrl);
       } else {
-         // Organizer registration is immediate
-         const { email: responseEmail, access, refresh } = res.data;
-         loginUser({ email: responseEmail }, access, role);
-         toast.success('Account Created Successfully', { id: toastId })
-         router.push("/dashboard");
+        let redirectUrl = `/verify-otp?email=${organiserEmail}&role=organizer`;
+        if (callbackUrl) redirectUrl += `&callbackUrl=${encodeURIComponent(callbackUrl)}`;
+        router.push(redirectUrl);
       }
 
     } catch (err) {
@@ -110,29 +134,90 @@ const SignUp = () => {
     }
   };
 
-  // const googleLogin = useGoogleLogin({
-  //   onSuccess: async (tokenResponse) => {
-  //     setLoading(true);
-  //     try {
-  //       const endpoint = role === "student" ? '/student/google-signup/' : '/organizer/google-signup/';
-  //       const res = await api.post(endpoint, {
-  //         token: tokenResponse.access_token,
-  //       });
+
+
+
+  const googleLogin = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      console.log("Google OAuth Success. Token Response:", tokenResponse);
+      setLoading(true);
+      const toastId = toast.loading('Authenticating with Google...');
+      try {
+        const endpoint = role === "Student" ? '/student/google-signup/' : '/organizer/google-signup/';
+        console.log(`Sending request to: ${endpoint}`);
         
-  //       const { email, access, refresh } = res.data;
-  //       loginUser({ email }, access, role);
+        const res = await api.post(endpoint, {
+          token: tokenResponse.access_token,
+        });
+
+        console.log("Backend Response:", res.data);
+
+        const { email, access, refresh, is_new_user, role: responseRole } = res.data;
         
-  //       toast.success('Account Created Successfully');
-  //       router.push("/dashboard");
-  //     } catch (err) {
-  //       console.error('Google signup error:', err);
-  //       toast.error(err.response?.data?.error || "Google signup failed");
-  //     } finally {
-  //       setLoading(false);
-  //     }
-  //   },
-  //   onError: () => toast.error('Google signup failed'),
-  // });
+        // Determine the user role
+        let userRole = responseRole || role;
+        if (!userRole && access) {
+          const decoded = parseJwt(access);
+          userRole = decoded?.role || decoded?.user_type;
+          
+          if (!userRole && decoded?.is_organizer) {
+            userRole = 'Organizer';
+          }
+        }
+        
+        // Fallback: Use the role state if still not determined
+        if (!userRole) {
+          userRole = role;
+        }
+        
+        // Normalize role to match store expectations
+        userRole = userRole.charAt(0).toUpperCase() + userRole.slice(1).toLowerCase();
+        
+        loginUser({ ...res.data }, access, refresh, userRole);
+
+        if (is_new_user) {
+          toast.success('Account Created Successfully', { id: toastId });
+        } else {
+          toast.success('Login Successful', { id: toastId });
+        }
+        
+        // Use callbackUrl if provided, otherwise redirect to dashboard
+        if (callbackUrl) {
+          const decodedUrl = decodeURIComponent(callbackUrl);
+          router.replace(decodedUrl);
+        } else {
+          // Redirect based on role
+          const normalizedRole = userRole.toLowerCase().trim();
+          if (normalizedRole === 'organizer' || normalizedRole === 'org') {
+            router.replace("/dashboard/org");
+          } else {
+            router.replace("/dashboard/student/my-tickets");
+          }
+        }
+      } catch (err) {
+        console.error('Google signup error object:', err);
+        console.log('Error Response Data:', err.response?.data);
+        console.log('Error Status:', err.response?.status);
+        console.log('Error Headers:', err.response?.headers);
+        
+        toast.error(err.response?.data?.error || "Google signup failed", { id: toastId });
+      } finally {
+        setLoading(false);
+      }
+    },
+    onError: () => {
+      toast.error('Google signup failed');
+      setLoading(false);
+    },
+  });
+
+  const parseJwt = (token) => {
+    try {
+      return JSON.parse(atob(token.split(".")[1]));
+    } catch (e) {
+      return null;
+    }
+  };
 
   const handleSocialLogin = (provider) => {
     if (provider === 'Google') {
@@ -143,20 +228,11 @@ const SignUp = () => {
   return (
     <div className="min-h-screen w-full flex bg-[#0A0A14]">
       {/* Left Image */}
-      <div className="hidden lg:flex w-1/2 relative items-center justify-center overflow-hidden">
-        <div
-          className="absolute inset-0 bg-cover bg-center z-0 opacity-40 "
-          style={{
-            backgroundImage: `url('https://images.unsplash.com/photo-1568289523939-61125d216fe5?q=80&w=436&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')`,
-            filter: "grayscale(30%)",
-          }}
+      <div className="hidden lg:flex w-1/2 relative items-center justify-center overflow-hidden group">
+        <BackgroundCarousel
+          images={['/IMG (1).jpg', '/ticket image (1).jpeg']}
+          interval={5000}
         />
-        <div className="relative z-10 w-[40%] flex items-center justify-center">
-          <img
-            alt="Center Image"
-            src='/assets/image 2 (1).png'
-          />
-        </div>
       </div>
 
       <motion.div
@@ -165,12 +241,7 @@ const SignUp = () => {
         transition={{ duration: 0.5, ease: "easeOut" }}
         className="w-full lg:w-1/2 flex flex-col items-center justify-center px-6 py-8 md:py-12 lg:px-16 xl:px-24 overflow-y-auto">
         <div className="w-full max-w-md">
-          <div className="flex justify-center mb-6 md:mb-8">
-            <Logo textSize="text-2xl md:text-3xl" iconSize="h-6 w-6 md:h-8 md:w-8" />
-          </div>
-
           <h1 className="text-2xl md:text-4xl font-bold text-white mb-6 md:mb-8 text-center">
-
             Create Account
           </h1>
 
@@ -179,19 +250,19 @@ const SignUp = () => {
             <button
               onClick={() => setRole("student")}
            className={`flex-1 py-2 md:py-3 px-4 md:px-6 rounded-full font-semibold text-sm md:text-base transition-all duration-200 ${
-                role === "student"
-                  ? "bg-yellow-400 text-black border-yellow-400"
+                role === "Student"
+                  ? "bg-rose-600 text-white border-rose-600"
                   : "border-gray-600 border text-gray-300 hover:border-gray-500"
               }`}
               >
-              Student  
+              User 
             </button>
 
             <button
               onClick={() => setRole("organizer")}
               className={`flex-1 py-2 md:py-3 px-4 md:px-6 rounded-full font-semibold text-sm md:text-base transition-all duration-200 ${
-                role === "organizer"
-                  ? "bg-yellow-400 text-black border-yellow-400"
+                role === "Organizer"
+                  ? "bg-rose-600 text-white border-rose-600"
                   : "border-gray-600 border text-gray-300 hover:border-gray-500"
               }`}
             >
@@ -244,7 +315,7 @@ const SignUp = () => {
                   {/* EMAIL */}
                   <div>
                     <label className="block text-white/80 text-[10px] md:text-xs font-semibold uppercase tracking-wide mb-1 md:mb-2">
-                      Student Email
+                      Email Address
                     </label>
                     <div className="relative">
                       <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 h-4 w-4 md:h-5 md:w-5" />
@@ -252,7 +323,7 @@ const SignUp = () => {
                         type="email"
                           id="email"
                         name="email"
-                        placeholder="your.name@student.edu.ng"
+                        placeholder="your.email@example.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         className="w-full bg-transparent border border-gray-200 dark:border-gray-800 rounded-xl py-3 md:py-3.5 pl-10 md:pl-12 pr-4 text-sm md:text-base text-white hover:border-rose-500/60 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all duration-200 dark:placeholder:text-gray-600"
@@ -260,7 +331,7 @@ const SignUp = () => {
                     </div>
                     {invalidEmail && (
                       <p className="text-red-500 text-[10px] md:text-xs mt-1">
-                        Please enter a valid student email address.
+                        Please enter a valid email address.
                       </p>
                     )}
                   </div>
@@ -345,6 +416,30 @@ const SignUp = () => {
                     )}
                   </div>
 
+                  {/* Phone */}
+                  <div>
+                    <label className="block text-white/80 text-[10px] md:text-xs font-semibold uppercase tracking-wide mb-1 md:mb-2">
+                      Phone Number *
+                    </label>
+                    <div className="relative">
+                      <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 h-4 w-4 md:h-5 md:w-5" />
+                      <input
+                        type="tel"
+                        id="phone"
+                        name="phone"
+                        placeholder="+2348012345678"
+                        value={organiserPhone}
+                        onChange={(e) => setOrganiserPhone(e.target.value)}
+                        className="w-full bg-transparent border border-gray-200 dark:border-gray-800 rounded-xl py-3 md:py-3.5 pl-10 md:pl-12 pr-4 text-sm md:text-base text-white hover:border-rose-500/60 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all duration-200 dark:placeholder:text-gray-600"
+                      />
+                    </div>
+                    {invalidPhone && (
+                      <p className="text-red-500 text-[10px] md:text-xs mt-1">
+                        Phone number must be a valid Nigerian number (e.g., 08012345678 or +23480...).
+                      </p>
+                    )}
+                  </div>
+
                   {/* Password */}
                   <div>
                     <label className="block text-white/80 text-[10px] md:text-xs font-semibold uppercase tracking-wide mb-1 md:mb-2">
@@ -388,51 +483,45 @@ const SignUp = () => {
            {!loading && <ArrowRight className="ml-2 h-4 w-4 md:h-5 md:w-5" />}
         </button>
 
-            {/* --- OR Separator --- */}
-            <div className="relative my-3 md:my-4 text-center">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-800"></div>
-              </div>
-              <span className="relative px-4 text-xs md:text-sm text-gray-500 bg-[#050B14]">
-                or
-              </span>
-            </div>
 
-              {/* --- Social Login Buttons --- */}
-        <div className="flex gap-4 justify-center mb-4">
-            {/* <button
-                type="button"
-                onClick={() => handleSocialLogin('Google')}
-                disabled={loading}
-                className="w-12 h-12 bg-white rounded-lg flex items-center justify-center hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95 group"
-                title="Sign up with Google"
-            >
-                 <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/google/google-original.svg" alt="Google" className="w-5 h-5 group-hover:scale-110 transition-transform"/>
-            </button> */}
-
+      {/* --- Social Login Buttons --- */}
+              <>
+                {/* --- OR Separator --- */}
+                <div className="relative my-3 md:my-4 text-center">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-800"></div>
+                  </div>
+                  <span className="relative px-4 text-xs md:text-sm text-gray-500 bg-[#0A0A14]">
+                    or
+                  </span>
+                </div>
+                <div className="flex gap-4 justify-center mb-4">
                 <Button
               variant="outline"
-              onClick={() => toast.error('Social login currently unavailable')}
+              type="button"
+              onClick={() => googleLogin()}
+              disabled={loading}
               className="w-full h-10 md:h-12 rounded-xl border-gray-800 bg-zinc-900 hover:bg-zinc-800 text-gray-300 transition-all duration-200"
             >
               <div className="flex items-center justify-center gap-3">
                 <div className="h-4 w-4 md:h-5 md:w-5 flex items-center justify-center">
                   <img
-                   src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/google/google-original.svg"
-                    alt="Google" 
+                    src="/Logo-google-icon-PNG.png"
+                    alt="Google"
                   />
                 </div>
                 <span className="text-sm md:text-base">Sign Up with Google</span>
               </div>
             </Button>
         </div>
+      </>
           </form>
 
           {/* Already have an account? Sign in */}
           <div className="text-center mt-3">
             <p className="text-gray-400 text-xs md:text-sm">
               Already have an account?{" "}
-              <Link href="/login" className="text-[#FF3A66] hover:text-[#cf153e] font-semibold underline">
+              <Link href={callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/login"} className="text-[#FF3A66] hover:text-[#cf153e] font-semibold underline">
                 Sign in
               </Link>
             </p>
@@ -440,6 +529,14 @@ const SignUp = () => {
         </div>
       </motion.div>
     </div>
+  );
+};
+
+const SignUp = () => {
+  return (
+    <Suspense fallback={<div className="min-h-screen w-full flex items-center justify-center bg-[#0A0A14]"><Loader2 className="animate-spin h-8 w-8 text-rose-600" /></div>}>
+      <SignUpContent />
+    </Suspense>
   );
 };
 

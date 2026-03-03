@@ -6,14 +6,16 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import api from "../../../lib/axios";
-import { Mail, Lock, Loader2, ArrowRight, CheckCircle, Clock } from "lucide-react";
+import { Loader2, CheckCircle, Clock } from "lucide-react";
 import Logo from "@/components/Logo";
+import { getErrorMessage } from "@/lib/utils";
+import BackgroundCarousel from "../../../components/BackgroundCarousel";
 
 const VerifyOTPContent = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get("email") || "";
-  const role = searchParams.get("role") || "";
+  const callbackUrl = searchParams.get("callbackUrl");
 
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
@@ -79,8 +81,15 @@ const VerifyOTPContent = () => {
         otp: otpCode,
       });
 
-      toast.success("Email verified successfully!", { id: toastId });
-      router.push("/login"); // Redirect to login after verification as per flow usually, or dashboard if auto-login
+      toast.success("Email verified successfully! Please login to continue.", { id: toastId });
+
+      // Redirect to login page with callbackUrl preserved
+      if (callbackUrl) {
+        router.replace(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
+      } else {
+        router.replace('/login');
+      }
+
     } catch (err) {
       console.error("Verify OTP error:", err.response || err);
       const message = getErrorMessage(err);
@@ -113,22 +122,25 @@ const VerifyOTPContent = () => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
+  };  
+
+  // handle verify otp form submission
+    
 
   return (
     <div className="min-h-screen w-full flex bg-[#0A0A14]">
       {/* Left Image */}
-      <div className="hidden lg:flex w-1/2 relative items-center justify-center overflow-hidden">
-        <div
-          className="absolute inset-0 bg-cover bg-center z-0 opacity-40"
-          style={{
-            backgroundImage: `url('https://images.unsplash.com/photo-1568289523939-61125d216fe5?q=80&w=436&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')`,
-            filter: "grayscale(30%)",
-          }}
+     <div className="hidden lg:flex w-1/2 relative items-center justify-center overflow-hidden group">
+        <BackgroundCarousel
+          images={['/IMG (1).jpg', '/ticket image (1).jpeg']}
+          interval={5000}
         />
-        <div className="relative z-10 w-[40%] flex items-center justify-center">
-          <img alt="Center Image" src="/assets/image 2 (1).png" />
-        </div>
+        {/* <div className="relative z-10 w-[40%] flex items-center justify-center">
+          <img
+            alt="Center Image"
+            src='/assets/image 2 (1).png'
+          />
+        </div> */}
       </div>
 
       <motion.div
@@ -137,15 +149,15 @@ const VerifyOTPContent = () => {
         transition={{ duration: 0.5, ease: "easeOut" }}
         className="w-full lg:w-1/2 flex flex-col items-center justify-center px-6 py-12 lg:px-16 xl:px-24 overflow-y-auto">
         <div className="w-full max-w-md">
-          <div className="flex justify-center mb-8">
-            <Logo textSize="text-3xl" iconSize="h-8 w-8" />
+          <div className="flex justify-center mb-4">
+            <Logo textSize="text-3xl" iconSize="h-38 w-auto" />
           </div>
 
           <h1 className="text-4xl font-bold text-white mb-2 text-center">
             Verify Your Email
           </h1>
           <p className="text-base text-gray-400 mb-8 text-center">
-            We've sent a 6-digit code to <span className="text-white font-semibold">{email}</span> your email address.
+            We've sent a 6-digit code to <span className="text-white font-semibold">{email}</span>.
 
           </p>
 
@@ -236,7 +248,7 @@ const VerifyOTPContent = () => {
             <p className="text-gray-400 text-sm">
               Want to use a different email?{" "}
               <Link
-                href="/signup"
+                href={callbackUrl ? `/signup?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/signup"}
                 className="text-[#FF3A66] hover:text-[#cf153e] font-semibold underline">
                 Go back to signup
               </Link>

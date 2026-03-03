@@ -1,32 +1,28 @@
 "use client";
+// Force rebuild login page
 
-import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Mail,
-  Lock,
-  Loader2,
-  User,
-  Sparkles,
-  Eye,
-  EyeOff,
-  Check,
-  ArrowRight,
-} from "lucide-react";
-import toast from "react-hot-toast";
-import api from "../../../lib/axios";
-import useAuthStore from "../../../store/authStore";
-import { Button } from "../../../components/ui/button";
-import Logo from "@/components/Logo";
-import { getErrorMessage } from "@/lib/utils";
-import { useGoogleLogin } from "@react-oauth/google";
+import React, { useState, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
+import Link from 'next/link'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Mail, Lock, Loader2, User, Sparkles, Eye, EyeOff, Check, ArrowRight } from 'lucide-react'
+import toast from 'react-hot-toast'
+import api from '../../../lib/axios'
+import useAuthStore from '../../../store/authStore'
+import { Button } from '../../../components/ui/button'
+import Logo from '@/components/Logo'
+import { getErrorMessage } from '@/lib/utils'
+import BackgroundCarousel from '@/components/BackgroundCarousel'
+import { useGoogleLogin } from '@react-oauth/google';
 
-const LoginPage = () => {
+const LoginContent = () => {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl");
   const login = useAuthStore((state) => state.login);
 
+  const [role, setRole] = useState("Student");
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -72,46 +68,119 @@ const LoginPage = () => {
 
   const handleGoogleLogin = useGoogleLogin({
     onSuccess: async (tokenResponse) => {
+      setLoading(true);
+      const toastId = toast.loading('Signing in with Google...');
       try {
-        const res = await api.post('/student/google-signup/', {
+        const endpoint = role === "Student" ? "/student/google-signup/" : "/organizer/google-signup/";
+        const res = await api.post(endpoint, {
           token: tokenResponse.access_token,
         });
         const { user_id, email, access, refresh, is_new_user, role: responseRole } = res.data;
         
-        const userRole = extractUserRole(responseRole, access);
+        // Determine the user role
+        let userRole = responseRole || role;
+        if (!userRole && access) {
+          const decoded = parseJwt(access);
+          userRole = decoded?.role || decoded?.user_type;
+          
+          if (!userRole && decoded?.is_organizer) {
+            userRole = 'Organizer';
+          }
+        }
         
-        login({ user_id, email }, access, userRole);
-        toast.success('Login successful!');
-        router.push('/dashboard');
+        // Fallback: Use the role state if still not determined
+        if (!userRole) {
+          userRole = role;
+        }
+        
+        // Normalize role to match store expectations
+        userRole = userRole.charAt(0).toUpperCase() + userRole.slice(1).toLowerCase();
+        
+        login({ user_id, email, ...res.data }, access, refresh, userRole);
+
+        toast.success("Login successful!", { id: toastId });
+        
+        // Use callbackUrl if provided, otherwise redirect to dashboard
+        if (callbackUrl) {
+          const decodedUrl = decodeURIComponent(callbackUrl);
+          router.replace(decodedUrl);
+        } else {
+          // Redirect to appropriate dashboard based on role
+          const normalizedRole = userRole.toLowerCase().trim();
+          if (normalizedRole === "organizer" || normalizedRole === "org") {
+            router.replace('/dashboard/org');
+          } else if (normalizedRole === "student") {
+            router.replace('/dashboard/student');
+          } else {
+            router.replace('/dashboard');
+          }
+        }
       } catch (err) {
         console.error("Google login error:", err);
-        toast.error("Google login failed");
+        toast.error(err.response?.data?.error || "Google login failed", { id: toastId });
+      } finally {
+        setLoading(false);
       }
     },
     onError: () => {
       toast.error("Google login failed");
+      setLoading(false);
     },
   });
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+    const toastId = toast.loading('Logging in...')
 
     try {
-      const response = await api.post('/login/', formData)
+      // Send role with login request for backend validation
+      const expectedRole = role.toLowerCase(); // "student" or "organizer"
+      const response = await api.post('/login/', {
+        ...formData,
+        role: expectedRole
+      })
       const { user_id, email, access, refresh, role: responseRole } = response.data
       
-      const userRole = extractUserRole(responseRole, access);
+      // Verify the returned role matches what the user selected
+      const actualRole = responseRole?.toLowerCase();
+      if (actualRole && actualRole !== expectedRole) {
+        // Role mismatch - user is trying to login with wrong role
+        const correctRoleDisplay = actualRole === 'student' ? 'Student' : 'Organizer';
+        throw new Error(`This account is registered as ${correctRoleDisplay}. Please select "${correctRoleDisplay}" to login.`);
+      }
 
-      login({ user_id, email }, access, userRole)
+      // Use the response role if available, otherwise use selected role
+      const userRole = actualRole || expectedRole;
+
+      login({ ...response.data }, access, refresh, userRole)
       toast.success('Login successful! Redirecting...', { id: toastId })
-      router.push('/dashboard')
+      
+      // Use router.replace to avoid adding to history and ensure clean redirect
+      if (callbackUrl) {
+        const decodedUrl = decodeURIComponent(callbackUrl);
+        console.log('Redirecting to callback URL:', decodedUrl);
+        router.replace(decodedUrl);
+      } else {
+        // Redirect to appropriate dashboard based on role
+        const normalizedRole = userRole.toLowerCase().trim();
+        if (normalizedRole === "organizer" || normalizedRole === "org") {
+          router.replace('/dashboard/org');
+        } else if (normalizedRole === "student") {
+          router.replace('/dashboard/student');
+        } else {
+          router.replace('/dashboard');
+        }
+      }
     } catch (err) {
       console.error("Login error:", err);
-      const message = err.response?.data?.error || "Invalid email or password";
+      // Handle custom error messages (role mismatch)
+      const message = err.message?.includes('registered as') 
+        ? err.message 
+        : (err.response?.data?.error || "Invalid email or password");
       setError(message);
-      toast.error(message);
+      toast.error(message, { id: toastId });
     } finally {
       setLoading(false);
     }
@@ -119,19 +188,20 @@ const LoginPage = () => {
 
   return (
     <div className="min-h-screen w-full flex bg-[#0A0A14]">
-      {/* left Side - Image */}
-      <div className="hidden lg:flex w-1/2 relative items-center justify-center overflow-hidden">
-        <div
-          className="absolute inset-0 bg-cover bg-center z-0 opacity-40"
-          style={{
-            backgroundImage: `url('https://images.unsplash.com/photo-1568289523939-61125d216fe5?q=80&w=436&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')`,
-            filter: "grayscale(30%)",
-          }}
-        />
-        <div className="relative z-10  w-[40%] flex items-center justify-center">
-          <img alt="Center Image" src="assets/image 2 (1).png" />
-        </div>
-      </div>
+
+            {/* Left Image */}
+             <div className="hidden lg:flex w-1/2 relative items-center justify-center overflow-hidden group">
+               <BackgroundCarousel
+                 images={['/IMG (1).jpg', '/ticket image (1).jpeg']}
+                 interval={5000}
+               />
+               {/* <div className="relative z-10 w-[40%] flex items-center justify-center">
+                 <img
+                   alt="Center Image"
+                   src='/assets/image 2 (1).png'
+                 />
+               </div> */}
+             </div>
       {/* Right Side - Form */}
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -140,15 +210,6 @@ const LoginPage = () => {
         className="w-full lg:w-1/2 flex flex-col items-center justify-center px-6 py-8 md:py-12 lg:px-16 xl:px-24 overflow-y-auto"
       >
         <div className="w-full max-w-md">
-          <div className="flex justify-center mb-6 md:mb-8">
-            <Logo
-              href="/"
-              textColor="white"
-              textSize="text-2xl md:text-3xl"
-              iconSize="h-6 w-6 md:h-8 md:w-8"
-            />
-          </div>
-
           <h1 className="text-2xl md:text-4xl font-bold text-white mb-2 text-center">
             Welcome Back
           </h1>
@@ -156,6 +217,31 @@ const LoginPage = () => {
           <p className="text-sm md:text-base text-gray-400 mb-6 md:mb-8 text-center">
             Sign in to get your tickets
           </p>
+
+           {/* Role Switch */}
+          <div className="flex gap-2 mb-6 md:mb-8">
+            <button
+              onClick={() => setRole("Student")}
+           className={`flex-1 py-2 md:py-3 px-4 md:px-6 rounded-full font-semibold text-sm md:text-base transition-all duration-200 ${
+                role === "Student"
+                  ? "bg-rose-600 text-white border-rose-600"
+                  : "border-gray-600 border text-gray-300 hover:border-gray-500"
+              }`}
+              >
+             User
+            </button>
+
+            <button
+              onClick={() => setRole("Organizer")}
+              className={`flex-1 py-2 md:py-3 px-4 md:px-6 rounded-full font-semibold text-sm md:text-base transition-all duration-200 ${
+                role === "Organizer"
+                  ? "bg-rose-600 text-white border-rose-600"
+                  : "border-gray-600 border text-gray-300 hover:border-gray-500"
+              }`}
+            >
+              Organizer
+            </button>
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 md:space-y-6">
             {/* Email Field */}
@@ -174,7 +260,7 @@ const LoginPage = () => {
                   id="email"
                   name="email"
                   type="email"
-                  placeholder="radar@gmail.com"
+                  placeholder="Axile@gmail.com"
                   className="w-full bg-transparent border border-gray-200 dark:border-gray-800 rounded-xl py-3 md:py-3.5 pl-10 md:pl-12 pr-4 text-sm md:text-base text-white hover:border-rose-500/60 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all duration-200 dark:placeholder:text-gray-600"
                   value={formData.email}
                   onChange={handleChange}
@@ -254,7 +340,7 @@ const LoginPage = () => {
             <div className="text-xs md:text-sm text-center text-gray-400">
               Don&apos;t have an account?{" "}
               <Link
-                href="/signup"
+                href={callbackUrl ? `/signup?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/signup"}
                 className="font-semibold text-rose-400 hover:text-rose-300 hover:underline transition-colors"
               >
                 Create an account
@@ -274,24 +360,32 @@ const LoginPage = () => {
             <Button
               variant="outline"
               onClick={() => handleGoogleLogin()}
+              disabled={loading}
               className="w-full h-10 md:h-12 rounded-xl border-gray-800 bg-zinc-900 hover:bg-zinc-800 text-gray-300 transition-all duration-200"
             >
               <div className="flex items-center justify-center gap-3">
                 <div className="h-4 w-4 md:h-5 md:w-5 flex items-center justify-center">
                   <img
-                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/google/google-original.svg"
+                    src="/Logo-google-icon-PNG.png"
                     alt="Google"
                   />
                 </div>
-                <span className="text-sm md:text-base">
-                  Continue with Google
-                </span>
+                <span className="text-sm md:text-base">Continue with Google</span>
               </div>
             </Button>
+
           </div>
         </div>
       </motion.div>
     </div>
+  );
+};
+
+const LoginPage = () => {
+  return (
+    <Suspense fallback={<div className="min-h-screen w-full flex items-center justify-center bg-[#0A0A14]"><Loader2 className="animate-spin h-8 w-8 text-rose-600" /></div>}>
+      <LoginContent />
+    </Suspense>
   );
 };
 

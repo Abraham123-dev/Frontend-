@@ -7,17 +7,35 @@ import { Loader2, MapPin, Calendar as CalendarIcon, Search, ArrowLeft } from "lu
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { getImageUrl } from "@/lib/utils";
+import { EventsGridSkeleton } from "@/components/skeletons";
 
 const PublicEventsPage = () => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [filter, setFilter] = useState("all"); 
+
+  const shuffleArray = (array) => {
+    let currentIndex = array.length, randomIndex;
+    while (currentIndex != 0) {
+      randomIndex = Math.floor(Math.random() * currentIndex);
+      currentIndex--;
+      [array[currentIndex], array[randomIndex]] = [
+        array[randomIndex], array[currentIndex]];
+    }
+    return array;
+  };
 
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        const response = await api.get("/create-event/");
-        setEvents(response.data);
+        const response = await api.get("/event/");
+        const eventsData = Array.isArray(response.data) ? response.data : (response.data.events || []);
+        // Only show verified events to public
+        const verifiedEvents = eventsData.filter(event => !event.status || event.status === 'verified');
+        // Randomize initial load
+        setEvents(shuffleArray([...verifiedEvents]));
       } catch (error) {
         console.error("Error fetching events:", error);
       } finally {
@@ -28,9 +46,36 @@ const PublicEventsPage = () => {
     fetchEvents();
   }, []);
 
-  const filteredEvents = events.filter((event) =>
-    event.event_name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const getFilteredAndSortedEvents = () => {
+    let filtered = events.filter((event) =>
+      event.event_name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    // Apply pricing filter
+    if (filter === 'paid') {
+      filtered = filtered.filter(event => event.pricing_type === 'paid');
+    } else if (filter === 'free') {
+      filtered = filtered.filter(event => event.pricing_type === 'free');
+    }
+
+    if (filter === 'latest') {
+       return filtered.sort((a, b) => new Date(b.event_date) - new Date(a.event_date));
+    } else if (filter === 'popular') {
+       // Placeholder: In a real app, sort by ticket_sales or views. 
+       // For now, we'll just return the current list (which is likely randomized or in default order) 
+       // or we could re-shuffle if we wanted a different "random" look for popular.
+       // Let's just keep it as is, or maybe sort by price descending as a proxy? No, random is better for discovery.
+       return filtered; 
+    } else {
+       // 'all' - just return the list (which was randomized on load).
+       // Note: If we want 'all' to ALWAYS be random, we might need to re-shuffle here, 
+       // but that causes re-renders on every keystroke. 
+       // Best to stick with the initial random order for stability.
+       return filtered;
+    }
+  };
+
+  const filteredEvents = getFilteredAndSortedEvents();
 
   return (
     <div className="min-h-screen bg-[#0A0A14] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.15),rgba(255,255,255,0))]">
@@ -61,14 +106,34 @@ const PublicEventsPage = () => {
           </div>
         </div>
 
+        {/* Filters */}
+        <div className="flex gap-3 mb-8 overflow-x-auto pb-2 scrollbar-hide">
+          {['all', 'latest', 'popular', 'paid', 'free'].map((f) => (
+             <button
+               key={f}
+               onClick={() => {
+                 setFilter(f);
+                 if (f === 'all') {
+                    // Re-shuffle on explicit 'All' click to give a fresh look
+                    setEvents(prev => shuffleArray([...prev]));
+                 }
+               }}
+               className={`px-6 py-2 rounded-full text-sm font-semibold capitalize transition-all duration-300 whitespace-nowrap ${
+                 filter === f 
+                   ? "bg-white text-black shadow-lg shadow-white/10 scale-105" 
+                   : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5"
+               }`}
+             >
+               {f}
+             </button>
+          ))}
+        </div>
+
         {/* Content */}
         {loading ? (
-             <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-               {[1, 2, 3, 4, 5, 6].map((i) => (
-                 <div key={i} className="aspect-[4/3] rounded-2xl bg-white/5 animate-pulse" />
-               ))}
-             </div>
-        ) : events.length === 0 ? (
+          <EventsGridSkeleton showBackButton />
+        )
+ : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center space-y-4 rounded-3xl bg-white/5 border border-white/10">
             <div className="h-20 w-20 rounded-full bg-black/40 flex items-center justify-center">
                 <CalendarIcon className="h-10 w-10 text-gray-500" />
@@ -98,12 +163,12 @@ const PublicEventsPage = () => {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
                   >
-                    <Link href={`/dashboard/student/events/${event.event_id}`}>
+                    <Link href={`/events/${event.event_slug || event.event_id}`}>
                       <div className="group relative aspect-[4/3] overflow-hidden rounded-2xl bg-[#0F0F16] border border-white/10 cursor-pointer hover:border-primary/50 transition-all duration-300 shadow-xl">
                         {/* Background Image */}
                         {event.event_image ? (
                           <img
-                            src={event.event_image}
+                            src={getImageUrl(event.event_image)}
                             alt={event.event_name}
                             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                           />
