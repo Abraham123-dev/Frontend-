@@ -50,6 +50,17 @@ const LoginContent = () => {
     }
   };
 
+  const extractUserRole = (responseRole, accessToken) => {
+    let userRole = responseRole;
+    if (!userRole && accessToken) {
+      const decoded = parseJwt(accessToken);
+      // Check for common role claims
+      userRole = decoded?.role || decoded?.user_type || (decoded?.is_organizer ? 'organizer' : 'student');
+    }
+    // Fallback to 'student' if no role information is available
+    return userRole || 'student';
+  };
+
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     setError("");
