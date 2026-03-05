@@ -97,7 +97,7 @@ const HiringApplicationForm = ({ defaultPosition = "" }) => {
       errs.email = ["Enter a valid email address."];
     }
 
-    if (!form.phone.trim()) errs.phone = ["Phone number is required."];
+    if (!form.phone.trim()) errs.phone = ["WhatsApp number is required."];
 
     if (!form.are_you_student) {
       errs.are_you_student = ["Please select an option."];
@@ -257,12 +257,12 @@ const HiringApplicationForm = ({ defaultPosition = "" }) => {
           className="space-y-2"
         >
           <Label htmlFor="phone">
-            Phone <span className="text-destructive">*</span>
+            WhatsApp Number <span className="text-destructive">*</span>
           </Label>
           <Input
             id="phone"
             name="phone"
-            placeholder="+234 800 000 0000"
+            placeholder="+234 812 345 6789"
             value={form.phone}
             onChange={handleChange}
             className="bg-muted/50 border-border h-12 rounded-xl"
