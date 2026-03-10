@@ -21,7 +21,7 @@ const SignUpContent = () => {
   const callbackUrl = searchParams.get("callbackUrl");
   const loginUser = useAuthStore((state) => state.login);
 
-  const [role, setRole] = useState("student");
+  const [role, setRole] = useState("Student");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -65,7 +65,7 @@ const SignUpContent = () => {
   }, [searchParams]);
 
   const isFormValid = () => {
-    if (role === "student") {
+    if (role === "Student") {
       return (
         firstName.trim() &&
         lastName.trim() &&
@@ -91,7 +91,7 @@ const SignUpContent = () => {
     try {
       let payload;
       let endpoint = "/student/register/";
-      if (role === "student") {
+      if (role === "Student") {
         // Backend expects capitalized keys for student registration (see API docs)
         payload = {
           Firstname: firstName,
@@ -248,7 +248,7 @@ const SignUpContent = () => {
            {/* Role Switch */}
           <div className="flex gap-2 mb-6 md:mb-8">
             <button
-              onClick={() => setRole("student")}
+              onClick={() => setRole("Student")}
            className={`flex-1 py-2 md:py-3 px-4 md:px-6 rounded-full font-semibold text-sm md:text-base transition-all duration-200 ${
                 role === "Student"
                   ? "bg-rose-600 text-white border-rose-600"
@@ -259,7 +259,7 @@ const SignUpContent = () => {
             </button>
 
             <button
-              onClick={() => setRole("organizer")}
+              onClick={() => setRole("Organizer")}
               className={`flex-1 py-2 md:py-3 px-4 md:px-6 rounded-full font-semibold text-sm md:text-base transition-all duration-200 ${
                 role === "Organizer"
                   ? "bg-rose-600 text-white border-rose-600"
@@ -272,7 +272,7 @@ const SignUpContent = () => {
 
           <form onSubmit={submitForm} className="space-y-3 md:space-y-4">
             <div className="space-y-2 md:space-y-3">
-              {role === "student" && (
+              {role === "Student" && (
                 <>
                   {/* FIRST NAME AND LAST NAME */}
                   <div className="grid grid-cols-2 gap-2 md:gap-3">
@@ -371,7 +371,7 @@ const SignUpContent = () => {
               )}
 
               {/* --- ORGANIZER FORM --- */}
-              {role === "organizer" && (
+              {role === "Organizer" && (
                 <>
                   {/* Organisation Name */}
                   <div>
