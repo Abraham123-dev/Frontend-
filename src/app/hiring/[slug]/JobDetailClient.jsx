@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef } from "react";
+import React, { useRef, memo } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
@@ -16,14 +16,39 @@ import {
 import { Button } from "@/components/ui/button";
 import HiringApplicationForm from "@/components/hiring/HiringApplicationForm";
 
+// Hardware accelerated variants
 const fadeUp = {
-  hidden: { opacity: 0, y: 20 },
+  hidden: { opacity: 0, y: 15 },
   visible: (i = 0) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: i * 0.06, duration: 0.5, ease: "easeOut" },
+    transition: { 
+      delay: i * 0.05, 
+      duration: 0.4, 
+      ease: [0.25, 0.1, 0.25, 1.0] 
+    },
   }),
 };
+
+// Memoized static sections to prevent re-renders
+const SectionCard = memo(({ children, title, icon: Icon, iconColor = "text-primary", delay = 1 }) => (
+  <motion.div
+    custom={delay}
+    initial="hidden"
+    animate="visible"
+    variants={fadeUp}
+    style={{ willChange: "transform, opacity" }}
+    className="mb-8"
+  >
+    <div className="p-6 md:p-8 rounded-3xl bg-card border border-border">
+      <h2 className="text-xl font-bold mb-5 flex items-center gap-2">
+        {title}
+      </h2>
+      {children}
+    </div>
+  </motion.div>
+));
+SectionCard.displayName = "SectionCard";
 
 export default function JobDetailClient({ role }) {
   const applyRef = useRef(null);
@@ -33,18 +58,20 @@ export default function JobDetailClient({ role }) {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground pt-28 pb-20 selection:bg-primary/30">
-      {/* Background Decor */}
+    <div className="min-h-screen bg-background text-foreground pt-28 pb-20 selection:bg-primary/30 overflow-x-hidden">
+      {/* Background Decor - Optimized */}
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full h-full max-w-7xl pointer-events-none -z-10">
         <motion.div
-          animate={{ scale: [1, 1.1, 1], opacity: [0.15, 0.3, 0.15] }}
-          transition={{ duration: 10, repeat: Infinity }}
-          className="absolute top-32 left-10 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[120px]"
+          animate={{ scale: [1, 1.05, 1], opacity: [0.1, 0.2, 0.1] }}
+          transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+          style={{ willChange: "transform, opacity" }}
+          className="absolute top-32 left-10 w-[300px] md:w-[500px] h-[300px] md:h-[500px] bg-primary/5 rounded-full blur-[80px] md:blur-[120px]"
         />
         <motion.div
-          animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.25, 0.1] }}
-          transition={{ duration: 12, repeat: Infinity }}
-          className="absolute bottom-40 right-10 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-[120px]"
+          animate={{ scale: [1, 1.1, 1], opacity: [0.05, 0.15, 0.05] }}
+          transition={{ duration: 18, repeat: Infinity, ease: "linear" }}
+          style={{ willChange: "transform, opacity" }}
+          className="absolute bottom-40 right-10 w-[300px] md:w-[500px] h-[300px] md:h-[500px] bg-purple-500/5 rounded-full blur-[80px] md:blur-[120px]"
         />
       </div>
 
@@ -74,6 +101,7 @@ export default function JobDetailClient({ role }) {
                 initial="hidden"
                 animate="visible"
                 variants={fadeUp}
+                style={{ willChange: "transform, opacity" }}
                 className="mb-8"
               >
                 <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -107,95 +135,57 @@ export default function JobDetailClient({ role }) {
               </motion.div>
 
               {/* Description */}
-              <motion.div
-                custom={1}
-                initial="hidden"
-                animate="visible"
-                variants={fadeUp}
-                className="mb-10"
-              >
-                <div className="p-6 md:p-8 rounded-3xl bg-card border border-border">
-                  <h2 className="text-xl font-bold mb-4">About the Role</h2>
-                  <p className="text-muted-foreground leading-relaxed">
-                    {role.description}
-                  </p>
-                </div>
-              </motion.div>
+              <SectionCard title="About the Role" delay={1}>
+                <p className="text-muted-foreground leading-relaxed">
+                  {role.description}
+                </p>
+              </SectionCard>
 
               {/* Responsibilities */}
-              <motion.div
-                custom={2}
-                initial="hidden"
-                animate="visible"
-                variants={fadeUp}
-                className="mb-8"
-              >
-                <div className="p-6 md:p-8 rounded-3xl bg-card border border-border">
-                  <h2 className="text-xl font-bold mb-5">
-                    Key Responsibilities
-                  </h2>
-                  <ul className="space-y-3">
-                    {role.responsibilities.map((item, i) => (
-                      <li key={i} className="flex items-start gap-3">
-                        <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                        <span className="text-sm text-muted-foreground leading-relaxed">
-                          {item}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </motion.div>
+              <SectionCard title="Key Responsibilities" delay={2}>
+                <ul className="space-y-3">
+                  {role.responsibilities.map((item, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                      <span className="text-sm text-muted-foreground leading-relaxed">
+                        {item}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </SectionCard>
 
               {/* Requirements */}
-              <motion.div
-                custom={3}
-                initial="hidden"
-                animate="visible"
-                variants={fadeUp}
-                className="mb-8"
-              >
-                <div className="p-6 md:p-8 rounded-3xl bg-card border border-border">
-                  <h2 className="text-xl font-bold mb-5">Requirements</h2>
-                  <ul className="space-y-3">
-                    {role.requirements.map((item, i) => (
-                      <li key={i} className="flex items-start gap-3">
-                        <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
-                        <span className="text-sm text-muted-foreground leading-relaxed">
-                          {item}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-6 text-xs text-muted-foreground/70 italic leading-relaxed">
-                    PS – You don&apos;t have to meet all the requirements. As long as you&apos;re ready to learn, we&apos;re willing to make you a pro.
-                  </p>
-                </div>
-              </motion.div>
+              <SectionCard title="Requirements" delay={3}>
+                <ul className="space-y-3">
+                  {role.requirements.map((item, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
+                      <span className="text-sm text-muted-foreground leading-relaxed">
+                        {item}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-6 text-xs text-muted-foreground/70 italic leading-relaxed">
+                  PS – You don&apos;t have to meet all the requirements. As long as you&apos;re ready to learn, we&apos;re willing to make you a pro.
+                </p>
+              </SectionCard>
 
               {/* Nice to Have */}
               {role.niceToHave && role.niceToHave.length > 0 && (
-                <motion.div
-                  custom={4}
-                  initial="hidden"
-                  animate="visible"
-                  variants={fadeUp}
-                  className="mb-10"
-                >
-                  <div className="p-6 md:p-8 rounded-3xl bg-card border border-border">
-                    <h2 className="text-xl font-bold mb-5">Nice to Have</h2>
-                    <ul className="space-y-3">
-                      {role.niceToHave.map((item, i) => (
-                        <li key={i} className="flex items-start gap-3">
-                          <Star className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
-                          <span className="text-sm text-muted-foreground leading-relaxed">
-                            {item}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </motion.div>
+                <SectionCard title="Nice to Have" delay={4}>
+                  <ul className="space-y-3">
+                    {role.niceToHave.map((item, i) => (
+                      <li key={i} className="flex items-start gap-3">
+                        <Star className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                        <span className="text-sm text-muted-foreground leading-relaxed">
+                          {item}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </SectionCard>
               )}
 
               {/* ── Application Form ── */}
@@ -204,6 +194,7 @@ export default function JobDetailClient({ role }) {
                 initial="hidden"
                 animate="visible"
                 variants={fadeUp}
+                style={{ willChange: "transform, opacity" }}
                 ref={applyRef}
                 className="scroll-mt-24"
               >
@@ -221,36 +212,29 @@ export default function JobDetailClient({ role }) {
             <div className="hidden lg:block">
               <div className="sticky top-28">
                 <motion.div
-                  initial={{ opacity: 0, x: 20 }}
+                  initial={{ opacity: 0, x: 15 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.5, delay: 0.3 }}
+                  style={{ willChange: "transform, opacity" }}
                   className="p-6 rounded-3xl bg-card border border-border space-y-5"
                 >
                   <h3 className="font-bold text-lg">Quick Info</h3>
 
                   <div className="space-y-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground mb-1">Team</p>
-                      <p className="font-semibold">{role.team}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground mb-1">Location</p>
-                      <p className="font-semibold">{role.location}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground mb-1">Type</p>
-                      <p className="font-semibold">{role.employmentType}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground mb-1">Duration</p>
-                      <p className="font-semibold">{role.duration}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground mb-1">Role Type</p>
-                      <p className="font-semibold capitalize">
-                        {role.roleType}
-                      </p>
-                    </div>
+                    {[
+                      { label: "Team", value: role.team },
+                      { label: "Location", value: role.location },
+                      { label: "Type", value: role.employmentType },
+                      { label: "Duration", value: role.duration },
+                      { label: "Role Type", value: role.roleType, capitalize: true },
+                    ].map((item, i) => (
+                      <div key={i}>
+                        <p className="text-muted-foreground mb-1">{item.label}</p>
+                        <p className={`font-semibold ${item.capitalize ? 'capitalize' : ''}`}>
+                          {item.value}
+                        </p>
+                      </div>
+                    ))}
                   </div>
 
                   <Button
