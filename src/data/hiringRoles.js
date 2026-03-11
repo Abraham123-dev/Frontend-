@@ -214,7 +214,7 @@ export const hiringRoles = [
     team: "Administration",
     roleType: "administrative",
     employmentType: "Full-time",
-    location: "Remote (Nigeria)",
+    location: "Hybrid (Nigeria)",
     duration: "Indefinite",
     description:
       "As an Administrative Officer at Axile.ng, you will be the backbone of our operational excellence. You'll manage day-to-day administrative tasks, support human resources, coordinate team communications, and ensure the smooth running of our business operations. This role is ideal for organized, detail-oriented individuals looking to build a career in operations and business administration.",
