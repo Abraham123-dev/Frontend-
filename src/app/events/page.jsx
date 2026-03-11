@@ -31,13 +31,18 @@ const PublicEventsPage = () => {
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        const response = await api.get("/event/");
-        const eventsData = Array.isArray(response.data) ? response.data : (response.data.events || []);
+        // Fetch active/verified events from public endpoint
+        const publicResponse = await api.get("/event/");
+        const active = Array.isArray(publicResponse.data) ? publicResponse.data : (publicResponse.data.events || []);
         
-        // Active: verified or no status
-        const active = eventsData.filter(event => !event.status || event.status === 'verified');
-        // Past: closed status
-        const closed = eventsData.filter(event => event.status === 'closed');
+        // Attempt to fetch closed events from admin endpoint
+        let closed = [];
+        try {
+          const adminResponse = await api.get("/api/admin/events/?status=closed");
+          closed = adminResponse.data.events || [];
+        } catch (adminError) {
+          console.warn("Could not fetch closed events via admin endpoint:", adminError.message);
+        }
         
         setEvents(shuffleArray([...active]));
         setPastEvents(shuffleArray([...closed]));
