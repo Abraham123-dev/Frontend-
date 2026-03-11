@@ -20,7 +20,8 @@ import {
   EyeOff,
   XCircle,
   Check,
-  X
+  X,
+  Info
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { WalletPageSkeleton } from '@/components/skeletons';
@@ -189,7 +190,13 @@ export default function PayoutPage() {
       {/* Header */}
       <div>
         <h1 className="text-xl md:text-2xl font-bold mb-1">Payouts & Wallet</h1>
-        <p className="text-gray-400 text-xs">Request payouts from your earnings. Payments are reviewed and processed by admin.</p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+          <p className="text-gray-400 text-xs text-balance">Request payouts from your earnings. Payments are reviewed and processed by admin.</p>
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[10px] font-bold text-blue-400">
+            <Info className="w-3 h-3" />
+            7-day holding period for new earnings
+          </div>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -568,8 +575,10 @@ function StatCard({ label, amount, icon, description, hideBalances, onToggleVisi
 function StatusBadge({ status, label }) {
   const styles = {
     completed: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+    approved: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
     pending: 'bg-amber-500/10 text-amber-500 border-amber-500/20',
     failed: 'bg-rose-500/10 text-rose-500 border-rose-500/20',
+    rejected: 'bg-rose-500/10 text-rose-500 border-rose-500/20',
     cancelled: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
   };
 
