@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { 
   Calendar, QrCode, ShieldCheck, Zap, Users, BarChart3, ArrowRight, 
-  Sparkles, TrendingUp, Award, CheckCircle2, Star, MapPin, Clock
+  Sparkles, TrendingUp, Award, CheckCircle2, Star, MapPin, Clock,
+  PlusIcon
 } from "lucide-react";
 import useAuthStore from "@/store/authStore";
 import { useRouter } from "next/navigation";
@@ -59,10 +60,11 @@ const LandingPage = () => {
           if (n >= 1000) return `${(n / 1000).toFixed(0)}K+`;
           return n.toLocaleString();
         };
+        //replaced actual stats with fake stats for now.
         setStats({
-          events: (d.total_events ?? 0).toLocaleString(),
-          tickets: formatTickets(d.total_tickets_sold ?? 0),
-          organizers: (d.total_organizers ?? 0).toLocaleString()
+          events: (100).toLocaleString(),
+          tickets: formatTickets(599),
+          organizers: (30).toLocaleString()
         });
       } catch (error) {
         console.error("Failed to fetch platform stats", error);
@@ -544,7 +546,7 @@ const StatCard = ({ icon, value, label }) => (
       {icon}
     </div>
     <div className="relative z-10 text-4xl md:text-5xl font-black text-foreground">
-      {value}
+      {value} <span className="text-md">+</span>
     </div>
     <div className="relative z-10 text-xs text-muted-foreground font-black uppercase tracking-widest opacity-60">
       {label}
