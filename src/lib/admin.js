@@ -21,6 +21,16 @@ export const adminService = {
     const response = await api.get("/api/admin/dashboard/analytics/");
     return response.data.analytics;
   },
+  getPlatformRevenueBreakdown: async () => {
+    const response = await api.get("/api/admin/dashboard/platform-revenue/");
+    return response.data;
+  },
+  getRevenueStats: async (period = "monthly", limit = 12) => {
+    const response = await api.get(
+      `/api/admin/dashboard/revenue-stats/?period=${period}&limit=${limit}`
+    );
+    return response.data;
+  },
   getRecentEvents: async (limit = 10) => {
     const response = await api.get(
       `/api/admin/dashboard/recent-events/?limit=${limit}`,
@@ -29,9 +39,15 @@ export const adminService = {
   },
 
   // Events
-  getAllEvents: async () => {
-    const response = await api.get("/api/admin/events/");
-    return response.data.events;
+  getAllEvents: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const url = queryString ? `/api/admin/events/?${queryString}` : "/api/admin/events/";
+    const response = await api.get(url);
+    return {
+      events: response.data.events || [],
+      pagination: response.data.pagination,
+      filters: response.data.filters,
+    };
   },
   getEventDetails: async (eventId) => {
     // Prefer admin event detail endpoint (one call, includes organizer name/email/phone)

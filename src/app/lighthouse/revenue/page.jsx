@@ -122,10 +122,25 @@ export default function RevenuePage() {
   const [totalTransactions, setTotalTransactions] = useState(0);
   const [currentWithdrawalPage, setCurrentWithdrawalPage] = useState(1);
   const itemsPerPage = 20;
+  const [revenueStats, setRevenueStats] = useState([]);
+  const [revenuePeriod, setRevenuePeriod] = useState("monthly");
 
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const data = await adminService.getRevenueStats(revenuePeriod, 12);
+        setRevenueStats(data.revenue_stats || []);
+      } catch (e) {
+        console.error("Failed to fetch revenue stats", e);
+        setRevenueStats([]);
+      }
+    };
+    fetchStats();
+  }, [revenuePeriod]);
 
   useEffect(() => {
     if (activeTab === 'transactions' && !transactionsError) {
@@ -136,28 +151,24 @@ export default function RevenuePage() {
   const fetchData = async () => {
     setLoading(true);
     
-    // Use Promise.allSettled to handle partial failures gracefully
     const results = await Promise.allSettled([
       adminService.getAnalytics(),
-      adminService.getAllWithdrawals({ page: 1, page_size: 100 }), // Fetch more to allow client-side pagination or initial view
+      adminService.getAllWithdrawals({ page: 1, page_size: 100 }),
       adminService.getPaymentTransactions({ limit: itemsPerPage, offset: 0 })
     ]);
-    
-    // Handle analytics result
+
     if (results[0].status === 'fulfilled') {
       setStats(results[0].value);
     } else {
       console.error("Failed to fetch analytics:", results[0].reason);
     }
-    
-    // Handle withdrawals result
+
     if (results[1].status === 'fulfilled') {
       setWithdrawals(results[1].value?.withdrawals || []);
     } else {
       console.error("Failed to fetch withdrawals:", results[1].reason);
     }
-    
-    // Handle transactions result
+
     if (results[2].status === 'fulfilled') {
       setTransactions(results[2].value?.transactions || []);
       setTotalTransactions(results[2].value?.total_count || 0);
@@ -220,10 +231,10 @@ export default function RevenuePage() {
     <div className="space-y-6">
       {/* Stats Overview */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard 
-          title="Total Revenue" 
-          value={formatCurrency(totalRevenue)} 
-          subtitle="Platform fees collected"
+        <StatCard
+          title="Platform Revenue"
+          value={formatCurrency(totalRevenue)}
+          subtitle="Fees from ticket sales"
           icon={DollarSign}
         />
         <StatCard 
@@ -246,6 +257,79 @@ export default function RevenuePage() {
         />
       </div>
 
+      {/* Revenue by period (weekly / monthly) */}
+      <Card className="border-border/40 bg-card/50 backdrop-blur-sm">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <CardTitle className="text-sm font-medium">Revenue by period</CardTitle>
+            <div className="flex gap-1 p-1 bg-muted/30 rounded-xl border border-border/40">
+              <TabButton
+                active={revenuePeriod === "yearly"}
+                onClick={() => setRevenuePeriod("yearly")}
+              >
+                Yearly
+              </TabButton>
+              <TabButton
+                active={revenuePeriod === "monthly"}
+                onClick={() => setRevenuePeriod("monthly")}
+              >
+                Monthly
+              </TabButton>
+              <TabButton
+                active={revenuePeriod === "weekly"}
+                onClick={() => setRevenuePeriod("weekly")}
+              >
+                Weekly
+              </TabButton>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {revenueStats.length === 0 ? (
+            <div className="py-12 text-center">
+              <TrendingUp className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
+              <p className="text-sm text-muted-foreground">No revenue data for this period</p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="flex items-end gap-2 sm:gap-3 h-52 px-1">
+                {revenueStats.map((item, index) => {
+                  const maxVal = Math.max(...revenueStats.map((r) => r.total_revenue), 1);
+                  const pct = maxVal > 0 ? (item.total_revenue / maxVal) * 100 : 0;
+                  const heightPct = Math.max(pct, 4);
+                  return (
+                    <div
+                      key={`${item.period}-${index}`}
+                      className="flex-1 min-w-0 flex flex-col items-center gap-2 group relative"
+                    >
+                      <div
+                        className="w-full rounded-t-md bg-primary/80 hover:bg-primary transition-all duration-200 min-h-[8px] relative"
+                        style={{ height: `${heightPct}%` }}
+                        title={`${item.period}: ${formatCurrency(item.total_revenue)}`}
+                      >
+                        <span className="absolute -top-7 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-popover border border-border text-xs px-2 py-1 rounded shadow-md whitespace-nowrap z-10">
+                          {formatCurrency(item.total_revenue)}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-medium text-muted-foreground truncate max-w-full text-center" title={item.period}>
+                        {item.period}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground border-t border-border/40 pt-4">
+                {revenueStats.map((item) => (
+                  <span key={item.period}>
+                    <strong className="text-foreground">{item.period}</strong>: {formatCurrency(item.total_revenue)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Revenue Breakdown Cards */}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="border-border/40 bg-card/50 backdrop-blur-sm">
@@ -256,7 +340,7 @@ export default function RevenuePage() {
             <div className="flex items-center justify-between py-3 border-b border-border/40">
               <div>
                 <p className="text-sm font-medium text-foreground">Total Platform Revenue</p>
-                <p className="text-xs text-muted-foreground">All-time earnings</p>
+                <p className="text-xs text-muted-foreground">All-time</p>
               </div>
               <p className="text-lg font-semibold text-foreground">{formatCurrency(totalRevenue)}</p>
             </div>
